@@ -8,7 +8,9 @@ import {
   ChevronLeft,
   X,
   Upload,
-  Image as ImageIcon
+  Image as ImageIcon,
+  FileText,
+  Lock
 } from 'lucide-react';
 
 interface DesignViewProps {
@@ -16,8 +18,9 @@ interface DesignViewProps {
 }
 
 export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) => {
-  const { models, sizeDefs, addDesignModel, hasPermission } = useApp();
+  const { models, sizeDefs, addDesignModel, hasPermission, canAddDesignNotes } = useApp();
   const canEdit = hasPermission('design', true);
+  const canWriteNotes = canAddDesignNotes();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -30,10 +33,10 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
   const [sizeCategoryId, setSizeCategoryId] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-
   const [targetCutQuantity, setTargetCutQuantity] = useState<number>(500);
+  const [designNotes, setDesignNotes] = useState('');
 
-  // Filter models (CRITICAL USER REQUIREMENT: Only display models in design stage)
+  // Filter models (Only display models in design stage)
   const filteredModels = models
     .filter((m) => !m.is_deleted && (m.status === 'مرحلة التصميم' || m.status === 'تصميم'))
     .filter((m) => {
@@ -72,7 +75,8 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
       modelType,
       sizeCategoryId: sizeCategoryId || undefined,
       imageUrl: imageUrl || undefined,
-      targetCutQuantity: Number(targetCutQuantity) || 500
+      targetCutQuantity: Number(targetCutQuantity) || 500,
+      designNotes: canWriteNotes ? designNotes.trim() : ''
     });
 
     if (res.success) {
@@ -82,6 +86,7 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
       setSizeCategoryId('');
       setImageUrl('');
       setImagePreview(null);
+      setDesignNotes('');
       if (res.modelId) {
         onOpenModelDetails(res.modelId);
       }
@@ -105,7 +110,7 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Header matching Original Django Template */}
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
@@ -118,7 +123,7 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
           {canEdit && (
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>+ إضافة موديل جديد</span>
@@ -127,7 +132,7 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
         </div>
       </div>
 
-      {/* Search Input matching Original Django Template */}
+      {/* Search Input */}
       <div className="flex items-center gap-2 max-w-xl">
         <div className="relative flex-grow">
           <input
@@ -152,7 +157,7 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
         )}
       </div>
 
-      {/* Models Grid matching Original Cards */}
+      {/* Models Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
         {paginatedModels.length > 0 ? (
           paginatedModels.map((model) => (
@@ -189,7 +194,7 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
               <div className="p-5 text-center flex flex-col justify-between flex-grow">
                 <div>
                   <h3 className="text-xl font-extrabold text-slate-900 mb-2">{model.model_code}</h3>
-                  <div className="mb-4">
+                  <div className="mb-3">
                     <span
                       className={`inline-block px-3.5 py-1 rounded-full text-xs font-extrabold border ${getStatusBadge(
                         model.status
@@ -198,11 +203,16 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
                       {model.status}
                     </span>
                   </div>
+                  {(model.design_notes || model.notes_shirt || model.notes_pants) && (
+                    <p className="text-[11px] text-slate-500 line-clamp-1 mb-3 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
+                      📝 {model.design_notes || model.notes_shirt || model.notes_pants}
+                    </p>
+                  )}
                 </div>
 
                 <button
                   onClick={() => onOpenModelDetails(model.id)}
-                  className="w-full py-2.5 px-4 rounded-full border border-slate-900 text-slate-900 hover:bg-slate-900 hover:text-white font-bold text-xs transition shadow-xs"
+                  className="w-full py-2.5 px-4 rounded-full border border-slate-900 text-slate-900 hover:bg-slate-900 hover:text-white font-bold text-xs transition shadow-xs cursor-pointer"
                 >
                   التفاصيل والتلوين
                 </button>
@@ -220,7 +230,7 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
         )}
       </div>
 
-      {/* Pagination matching Original Django Template */}
+      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 pt-4">
           <button
@@ -247,15 +257,15 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
         </div>
       )}
 
-      {/* Add Model Modal matching Original Modal */}
+      {/* Add Model Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150 my-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <h3 className="font-extrabold text-lg text-slate-900">إضافة موديل جديد</h3>
               <button
                 onClick={() => setShowAddModal(false)}
-                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -305,18 +315,35 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">النوع</label>
-                <select
-                  value={modelType}
-                  onChange={(e) => setModelType(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-                >
-                  <option value="أولادي">أولادي</option>
-                  <option value="بناتي">بناتي</option>
-                  <option value="رجالي">رجالي</option>
-                  <option value="حريمي">حريمي</option>
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">النوع</label>
+                  <select
+                    value={modelType}
+                    onChange={(e) => setModelType(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
+                  >
+                    <option value="أولادي">أولادي</option>
+                    <option value="بناتي">بناتي</option>
+                    <option value="رجالي">رجالي</option>
+                    <option value="حريمي">حريمي</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    العدد المستهدف للقص *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={targetCutQuantity}
+                    onChange={(e) => setTargetCutQuantity(Number(e.target.value) || 0)}
+                    placeholder="مثال: 500"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
+                  />
+                </div>
               </div>
 
               <div>
@@ -338,25 +365,38 @@ export const DesignView: React.FC<DesignViewProps> = ({ onOpenModelDetails }) =>
                 </select>
               </div>
 
+              {/* Optional Design Notes Field gated by canAddDesignNotes() (Task 4) */}
               <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">
-                  العدد المستهدف للقص *
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  value={targetCutQuantity}
-                  onChange={(e) => setTargetCutQuantity(Number(e.target.value) || 0)}
-                  placeholder="مثال: 500"
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-amber-600" />
+                    <span>ملاحظات قسم التصميم (اختياري)</span>
+                  </label>
+                  {!canWriteNotes && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                      <Lock className="w-3 h-3" />
+                      يتطلب صلاحية ملاحظات التصميم
+                    </span>
+                  )}
+                </div>
+                <textarea
+                  rows={2}
+                  disabled={!canWriteNotes}
+                  value={designNotes}
+                  onChange={(e) => setDesignNotes(e.target.value)}
+                  placeholder={
+                    canWriteNotes
+                      ? 'أدخل أي ملاحظات فنية أو توجيهات خاصة بتصميم الموديل (اختياري)...'
+                      : 'ليس لديك صلاحية كتابة ملاحظات التصميم'
+                  }
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-slate-900 focus:outline-hidden disabled:bg-slate-100 disabled:text-slate-400"
                 />
               </div>
 
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm transition shadow-lg"
+                  className="w-full py-3 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm transition shadow-lg cursor-pointer"
                 >
                   حفظ الموديل
                 </button>

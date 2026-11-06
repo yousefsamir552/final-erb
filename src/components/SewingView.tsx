@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   Scissors, 
@@ -12,8 +12,10 @@ import {
   Calendar,
   AlertTriangle,
   Clock,
-  ArrowRight,
-  Filter
+  Lock,
+  FileText,
+  RotateCcw,
+  Save
 } from 'lucide-react';
 import { Model, ModelAccessory, SewingDispatch } from '../types';
 
@@ -24,13 +26,33 @@ export const SewingView: React.FC = () => {
     sewingDispatches, 
     dispatchModelToSewing, 
     receiveModelFromSewing,
-    logAction 
+    logAction,
+    globalSettings,
+    updateGlobalSettings,
+    canAddSewingNotes,
+    canEditMessageTemplates
   } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedModelForPrint, setSelectedModelForPrint] = useState<Model | null>(null);
   const [printTab, setPrintTab] = useState<'both' | 'shirt' | 'pants'>('both');
   const [pieceFilter, setPieceFilter] = useState<'all' | 'shirt' | 'pants'>('all');
+
+  // Editable bottom instructions for sewing print sheet (pulled from GlobalSettings)
+  const [printInstructionsText, setPrintInstructionsText] = useState<string>(
+    globalSettings.default_sewing_instructions ||
+      'تم التأكد من أعداد الإكسسوارات ومطابقتها للتشغيلة قبل التسليم للورشة. يرجى الالتزام التام بالمقاسات المعتمدة وتسليم العينة الأولى للفحص.'
+  );
+  const [savingDefaultInstructions, setSavingDefaultInstructions] = useState(false);
+
+  useEffect(() => {
+    if (selectedModelForPrint) {
+      setPrintInstructionsText(
+        globalSettings.default_sewing_instructions ||
+          'تم التأكد من أعداد الإكسسوارات ومطابقتها للتشغيلة قبل التسليم للورشة. يرجى الالتزام التام بالمقاسات المعتمدة وتسليم العينة الأولى للفحص.'
+      );
+    }
+  }, [selectedModelForPrint, globalSettings.default_sewing_instructions]);
 
   // Modal State for Dispatching to Sewing Workshop
   const [showDispatchModal, setShowDispatchModal] = useState(false);
@@ -41,6 +63,13 @@ export const SewingView: React.FC = () => {
   const [piecesCount, setPiecesCount] = useState<number>(0);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [dispatchNotes, setDispatchNotes] = useState('');
+
+  // Modal State for Receiving from Sewing Workshop (with optional notes)
+  const [receivingDispatch, setReceivingDispatch] = useState<SewingDispatch | null>(null);
+  const [receiveNotes, setReceiveNotes] = useState('');
+
+  const allowSewingNotes = canAddSewingNotes();
+  const canEditPrintInstructions = allowSewingNotes || canEditMessageTemplates();
 
   // Models ready for sewing: status 'في قسم المكن'
   const readyModels = models.filter(
@@ -59,7 +88,6 @@ export const SewingView: React.FC = () => {
   });
 
   const activeDispatches = filteredDispatches.filter(d => d.status !== 'تم الاستلام');
-  const completedDispatches = filteredDispatches.filter(d => d.status === 'تم الاستلام');
 
   const openDispatchModal = (model: Model, pieceType: 'shirt' | 'pants' = 'shirt') => {
     setSelectedModelId(model.id);
@@ -90,9 +118,9 @@ export const SewingView: React.FC = () => {
       setExpectedDeliveryDate(futureDate.toISOString().split('T')[0]);
     }
 
-    const defaultNotes = pieceType === 'shirt' 
-      ? (model.notes_shirt || '') 
-      : (model.notes_pants || '');
+    const defaultNotes = allowSewingNotes
+      ? (pieceType === 'shirt' ? (model.notes_shirt || '') : (model.notes_pants || ''))
+      : '';
     setDispatchNotes(defaultNotes);
 
     setShowDispatchModal(true);
@@ -112,7 +140,7 @@ export const SewingView: React.FC = () => {
       expectedDeliveryDate: expectedDeliveryDate,
       pieceType: dispatchPieceType,
       pieceLabel: dispatchPieceLabel,
-      notes: dispatchNotes.trim()
+      notes: allowSewingNotes ? dispatchNotes.trim() : ''
     });
 
     setShowDispatchModal(false);
@@ -124,15 +152,36 @@ export const SewingView: React.FC = () => {
   };
 
   const handleReceive = (dispatch: SewingDispatch) => {
-    const m = models.find(mod => mod.id === dispatch.model_id);
+    setReceivingDispatch(dispatch);
+    setReceiveNotes('');
+  };
+
+  const confirmReceiveFromSewing = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!receivingDispatch) return;
+    const m = models.find(mod => mod.id === receivingDispatch.model_id);
     const code = m?.model_code || 'الموديل';
-    const label = dispatch.piece_label || (dispatch.piece_type === 'shirt' ? 'تيشرت' : 'بنطلون');
-    if (confirm(`هل أنت متأكد من تسجيل استلام تشغيلة [${label}] موديل (${code}) من ورشة (${dispatch.workshop_name})؟`)) {
-      receiveModelFromSewing(dispatch.id, dispatch.model_id);
-      logAction(
-        'قسم المكن',
-        `استلام تشغيلة خياطة [${label}] موديل ${code} من ورشة ${dispatch.workshop_name} (${dispatch.pieces_count} قطعة)`
-      );
+    const label = receivingDispatch.piece_label || (receivingDispatch.piece_type === 'shirt' ? 'تيشرت' : 'بنطلون');
+    const finalNotes = allowSewingNotes ? receiveNotes.trim() : '';
+
+    receiveModelFromSewing(receivingDispatch.id, receivingDispatch.model_id, finalNotes || undefined);
+    logAction(
+      'قسم المكن',
+      `استلام تشغيلة خياطة [${label}] موديل ${code} من ورشة ${receivingDispatch.workshop_name} (${receivingDispatch.pieces_count} قطعة)${finalNotes ? ` — ملاحظات: ${finalNotes}` : ''}`
+    );
+    setReceivingDispatch(null);
+    setReceiveNotes('');
+  };
+
+  const handleSaveInstructionsAsGlobalDefault = async () => {
+    if (!canEditMessageTemplates()) return;
+    setSavingDefaultInstructions(true);
+    try {
+      await updateGlobalSettings({
+        default_sewing_instructions: printInstructionsText.trim()
+      });
+    } finally {
+      setSavingDefaultInstructions(false);
     }
   };
 
@@ -732,15 +781,32 @@ export const SewingView: React.FC = () => {
                 </div>
               </div>
 
+              {/* Optional Sewing Notes gated by can_add_sewing_notes */}
               <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">ملاحظات التشغيل والورشة</label>
-                <textarea
-                  rows={2}
-                  value={dispatchNotes}
-                  onChange={(e) => setDispatchNotes(e.target.value)}
-                  placeholder="أي تعليمات خاصة بالخياطة، السرفلة، المقاسات، أو الإكسسوارات..."
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
-                ></textarea>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-600">
+                    ملاحظات التشغيل والورشة (اختياري)
+                  </label>
+                  {!allowSewingNotes && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                      <Lock className="w-3 h-3" />
+                      <span>يتطلب صلاحية تسجيل ملاحظات المكن</span>
+                    </span>
+                  )}
+                </div>
+                {allowSewingNotes ? (
+                  <textarea
+                    rows={2}
+                    value={dispatchNotes}
+                    onChange={(e) => setDispatchNotes(e.target.value)}
+                    placeholder="أي تعليمات خاصة بالخياطة، السرفلة، المقاسات، أو الإكسسوارات..."
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
+                  ></textarea>
+                ) : (
+                  <div className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-[11px] text-slate-400">
+                    إدخال الملاحظات في قسم المكن غير مفعل لحسابك حالياً.
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
@@ -763,6 +829,80 @@ export const SewingView: React.FC = () => {
         </div>
       )}
 
+      {/* RECEIVE FROM SEWING MODAL (WITH OPTIONAL NOTES) */}
+      {receivingDispatch && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-purple-600 text-white flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base">
+                    تأكيد استلام تشغيلة من ورشة المكن
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    ورشة: {receivingDispatch.workshop_name} • ({receivingDispatch.pieces_count} قطعة)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setReceivingDispatch(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={confirmReceiveFromSewing} className="space-y-4 mt-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-600">
+                    ملاحظات استلام المكن (اختياري)
+                  </label>
+                  {!allowSewingNotes && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                      <Lock className="w-3 h-3" />
+                      <span>يتطلب صلاحية ملاحظات المكن</span>
+                    </span>
+                  )}
+                </div>
+                {allowSewingNotes ? (
+                  <textarea
+                    rows={3}
+                    value={receiveNotes}
+                    onChange={(e) => setReceiveNotes(e.target.value)}
+                    placeholder="سجل أي ملاحظات عند الاستلام من الورشة (جودة التشطيب، نقص أو استكمال، ملاحظات للفرز)..."
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-purple-600 focus:outline-hidden"
+                  />
+                ) : (
+                  <div className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-[11px] text-slate-400">
+                    لا تملك صلاحية كتابة ملاحظات قسم المكن — يمكنك تأكيد الاستلام مباشرة.
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReceivingDispatch(null)}
+                  className="px-4 py-2 rounded-full text-xs font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2 rounded-full bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs shadow-md shadow-purple-700/20 cursor-pointer"
+                >
+                  تأكيد الاستلام وتحويل للفرز
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* DUAL PRINTABLE MODAL WITH DYNAMIC DATES, STRICT PAGE BREAK, AND MODEL PICTURE ON BOTH */}
       {selectedModelForPrint && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -777,7 +917,7 @@ export const SewingView: React.FC = () => {
                     أمر تشغيل ورشة المكن: موديل {selectedModelForPrint.model_code}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    ورقتان منفصلتان تماماً عند الطباعة مع صورة الموديل وتاريخ الاستلام الفعلي المسجل لكل ورقة.
+                    ورقتان منفصلتان تماماً عند الطباعة مع صورة الموديل وقسم التعليمات السفلي المعتمد من الإعدادات العامة.
                   </p>
                 </div>
               </div>
@@ -827,6 +967,55 @@ export const SewingView: React.FC = () => {
               </div>
             </div>
 
+            {/* Editable Bottom Instructions Control Box (Non-Printable Toolbar) */}
+            <div className="mt-3 p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200 print:hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-1.5 text-xs font-black text-emerald-950">
+                  <FileText className="w-4 h-4 text-emerald-700" />
+                  <span>نص قسم التعليمات والملاحظات السفلي للورشة (يُسحب افتراضياً من الإعدادات العامة وقابل للتعديل):</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPrintInstructionsText(
+                        globalSettings.default_sewing_instructions ||
+                          'تم التأكد من أعداد الإكسسوارات ومطابقتها للتشغيلة قبل التسليم للورشة. يرجى الالتزام التام بالمقاسات المعتمدة وتسليم العينة الأولى للفحص.'
+                      )
+                    }
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-emerald-200 text-emerald-800 text-[11px] font-bold hover:bg-emerald-100 transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>استعادة النص الافتراضي</span>
+                  </button>
+                  {canEditMessageTemplates() && (
+                    <button
+                      type="button"
+                      disabled={savingDefaultInstructions}
+                      onClick={handleSaveInstructionsAsGlobalDefault}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-700 text-white text-[11px] font-bold hover:bg-emerald-800 transition cursor-pointer disabled:opacity-50"
+                    >
+                      <Save className="w-3 h-3" />
+                      <span>{savingDefaultInstructions ? 'جاري الحفظ...' : 'حفظ كافتراضي بالإعدادات العامة'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+              {canEditPrintInstructions ? (
+                <textarea
+                  rows={2}
+                  value={printInstructionsText}
+                  onChange={(e) => setPrintInstructionsText(e.target.value)}
+                  placeholder="مثال: تم التأكد من أعداد الإكسسوارات ومطابقتها للتشغيلة..."
+                  className="w-full px-3.5 py-2 rounded-xl bg-white border border-emerald-300 text-xs font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                />
+              ) : (
+                <p className="text-xs font-semibold text-slate-700 bg-white/80 px-3 py-2 rounded-xl border border-emerald-100">
+                  {printInstructionsText}
+                </p>
+              )}
+            </div>
+
             {/* DUAL SHEETS CONTAINER */}
             <div className="overflow-y-auto flex-grow p-4 space-y-8 print-container">
               
@@ -844,7 +1033,7 @@ export const SewingView: React.FC = () => {
                           أمر تشغيل ورشة المكن — [ورقة التيشرت T-Shirt]
                         </h4>
                         <p className="text-xs text-slate-500">
-                          نظام إدارة وتشغيل مصنع الملابس الجاهزة • خط خياطة التيشرت
+                          {globalSettings.site_name} • خط خياطة التيشرت
                         </p>
                       </div>
                     </div>
@@ -915,14 +1104,14 @@ export const SewingView: React.FC = () => {
                           <span>📌 تعليمات وملاحظات خياطة التيشرت:</span>
                         </h5>
                         <p className="text-xs text-slate-800 font-semibold whitespace-pre-wrap leading-relaxed">
-                          {selectedModelForPrint.notes_shirt || 'الالتزام بمقاسات الصدر والأكتاف والخياطة المزدوجة وفقاً لعينة الاعتماد المرفقة.'}
+                          {shirtDispatchForPrint?.notes || selectedModelForPrint.notes_shirt || 'الالتزام بمقاسات الصدر والأكتاف والخياطة المزدوجة وفقاً لعينة الاعتماد المرفقة.'}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   {/* Shirt Accessories Table */}
-                  <div className="mb-6">
+                  <div className="mb-5">
                     <h5 className="text-xs font-black text-slate-900 mb-2 flex items-center gap-1.5">
                       <Layers className="w-4 h-4 text-blue-600" />
                       <span>جدول إكسسوارات ومستلزمات التيشرت (حسب الاستهلاك المحدد للقطعة):</span>
@@ -979,6 +1168,17 @@ export const SewingView: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Bottom Instructions & Notes Section pulled from GlobalSettings */}
+                  <div className="mb-5 p-4 rounded-2xl bg-slate-50 border-2 border-blue-200/80">
+                    <h5 className="text-xs font-black text-blue-950 mb-1.5 flex items-center gap-1.5">
+                      <CheckCircle className="w-4 h-4 text-blue-600" />
+                      <span>التعليمات والملاحظات المعتمدة لتسليم الورشة:</span>
+                    </h5>
+                    <p className="text-xs text-slate-800 font-bold whitespace-pre-wrap leading-relaxed">
+                      {printInstructionsText}
+                    </p>
+                  </div>
+
                   {/* Signatures */}
                   <div className="pt-6 border-t-2 border-slate-200 flex items-center justify-between text-xs text-slate-700 font-bold">
                     <div>مشرف خط التيشرت: ........................................</div>
@@ -1009,7 +1209,7 @@ export const SewingView: React.FC = () => {
                           أمر تشغيل ورشة المكن — [ورقة البنطلون Pants]
                         </h4>
                         <p className="text-xs text-slate-500">
-                          نظام إدارة وتشغيل مصنع الملابس الجاهزة • خط خياطة البنطلون
+                          {globalSettings.site_name} • خط خياطة البنطلون
                         </p>
                       </div>
                     </div>
@@ -1080,14 +1280,14 @@ export const SewingView: React.FC = () => {
                           <span>📌 تعليمات وملاحظات خياطة البنطلون:</span>
                         </h5>
                         <p className="text-xs text-slate-800 font-semibold whitespace-pre-wrap leading-relaxed">
-                          {selectedModelForPrint.notes_pants || 'الالتزام بمقاسات الحجر والوسط وتثبيت الجيوب والأستك بدقة وفقاً للمواصفات الفنية.'}
+                          {pantsDispatchForPrint?.notes || selectedModelForPrint.notes_pants || 'الالتزام بمقاسات الحجر والوسط وتثبيت الجيوب والأستك بدقة وفقاً للمواصفات الفنية.'}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   {/* Pants Accessories Table */}
-                  <div className="mb-6">
+                  <div className="mb-5">
                     <h5 className="text-xs font-black text-slate-900 mb-2 flex items-center gap-1.5">
                       <Layers className="w-4 h-4 text-emerald-600" />
                       <span>جدول إكسسوارات ومستلزمات البنطلون (أستك، خيوط، كمر، بطانة):</span>
@@ -1142,6 +1342,17 @@ export const SewingView: React.FC = () => {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+
+                  {/* Bottom Instructions & Notes Section pulled from GlobalSettings */}
+                  <div className="mb-5 p-4 rounded-2xl bg-slate-50 border-2 border-emerald-200/80">
+                    <h5 className="text-xs font-black text-emerald-950 mb-1.5 flex items-center gap-1.5">
+                      <CheckCircle className="w-4 h-4 text-emerald-600" />
+                      <span>التعليمات والملاحظات المعتمدة لتسليم الورشة:</span>
+                    </h5>
+                    <p className="text-xs text-slate-800 font-bold whitespace-pre-wrap leading-relaxed">
+                      {printInstructionsText}
+                    </p>
                   </div>
 
                   {/* Signatures */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { FlashAlerts } from './components/FlashAlerts';
@@ -17,18 +17,31 @@ import { ReportsView } from './components/ReportsView';
 import { LoginModal } from './components/LoginModal';
 
 export const App: React.FC = () => {
-  const { currentUser, logout, addFlashMessage, hasPermission } = useApp();
+  const {
+    currentUser,
+    logout,
+    addFlashMessage,
+    hasPermission,
+    canAccessSettings,
+    canViewAuditLogs,
+    globalSettings
+  } = useApp();
 
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
 
-  const isSudoOrAdmin =
-    currentUser?.username === 'sudo' ||
-    currentUser?.is_sudo ||
-    currentUser?.role === 'owner' ||
-    currentUser?.role === 'مدير عام المصنع';
+  const isSudo =
+    currentUser?.username?.toLowerCase() === 'sudo' || Boolean(currentUser?.is_sudo);
+
+  // Dynamically sync browser document title with globalSettings.site_name
+  useEffect(() => {
+    if (globalSettings?.site_name) {
+      document.title = globalSettings.site_name;
+    }
+  }, [globalSettings?.site_name]);
 
   const canAccessTab = (tab: string): boolean => {
+    if (isSudo) return true;
     if (tab === 'dashboard') return true;
     if (
       tab === 'warehouse' ||
@@ -58,14 +71,15 @@ export const App: React.FC = () => {
         hasPermission('reports')
       );
     }
-    if (tab === 'models_tracking') return hasPermission('models_tracking') || isSudoOrAdmin;
-    if (tab === 'reports') return hasPermission('reports') || isSudoOrAdmin;
-    if (tab === 'settings' || tab === 'logs') return isSudoOrAdmin;
+    if (tab === 'models_tracking') return hasPermission('models_tracking');
+    if (tab === 'reports') return hasPermission('reports');
+    if (tab === 'settings') return canAccessSettings();
+    if (tab === 'logs') return canViewAuditLogs();
     return true;
   };
 
   // If user role changes and they lose permission for the current tab, send them to dashboard
-  React.useEffect(() => {
+  useEffect(() => {
     if (currentUser && !canAccessTab(currentTab)) {
       setCurrentTab('dashboard');
     }
@@ -97,6 +111,13 @@ export const App: React.FC = () => {
   const handleLogout = () => {
     logout();
   };
+
+  const siteLogo = globalSettings?.logo || '🏭';
+  const isImageLogo =
+    siteLogo.startsWith('http://') ||
+    siteLogo.startsWith('https://') ||
+    siteLogo.startsWith('data:image/') ||
+    siteLogo.startsWith('/');
 
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-slate-900 flex flex-col antialiased">
@@ -176,14 +197,27 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Footer */}
+      {/* Dynamic Footer connected to GlobalSettings (Task 3) */}
       <footer className="no-print border-t border-slate-200/80 bg-white py-6 mt-12 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <p className="font-semibold text-slate-700">
-            🏭 نظام إدارة المصنع المتكامل - مصانع الملابس الجاهزة (ERP v2.0)
-          </p>
+          <div className="flex items-center gap-2 font-semibold text-slate-700">
+            {isImageLogo ? (
+              <img
+                src={siteLogo}
+                alt={globalSettings?.site_name || 'Logo'}
+                className="w-5 h-5 rounded-md object-contain"
+              />
+            ) : (
+              <span>{siteLogo}</span>
+            )}
+            <span>
+              {globalSettings?.footer_title ||
+                `${globalSettings?.site_name || 'نظام إدارة المصنع'} - مصانع الملابس الجاهزة`}
+            </span>
+          </div>
           <p className="text-slate-400">
-            تم التطوير لدعم دورة الإنتاج الشاملة والصلاحيات المتقدمة © {new Date().getFullYear()}
+            {globalSettings?.copyright_text ||
+              `تم التطوير لدعم دورة الإنتاج الشاملة والصلاحيات المتقدمة © ${new Date().getFullYear()}`}
           </p>
         </div>
       </footer>

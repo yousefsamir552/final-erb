@@ -19,6 +19,7 @@ import {
   CustomRole,
   SystemSectionKey,
   RolePermissions,
+  GlobalSiteSettings,
   AccessoryType,
   AccessoryItem,
   AccessoryTransaction,
@@ -36,6 +37,22 @@ interface FlashMessage {
   text: string;
 }
 
+const DEFAULT_GLOBAL_SETTINGS: GlobalSiteSettings = {
+  site_name: 'نظام إدارة المصنع',
+  logo: '🏭',
+  footer_title: '🏭 نظام إدارة المصنع المتكامل - مصانع الملابس الجاهزة (ERP v2.0)',
+  copyright_text: `تم التطوير لدعم دورة الإنتاج الشاملة والصلاحيات المتقدمة © ${new Date().getFullYear()}`,
+  whatsapp_supplier_template:
+    'السلام عليكم ورحمة الله، مطلوب طلبية توريد عاجلة لمصنعنا:\n- الصنف / الخامة: {item_name}\n- الكود / اللون: {code}\n- الكمية المطلوبة: {quantity} {unit}\n- الرصيد الحالي بالمخزن: {available} {unit}\nبرجاء التأكيد وتحديد موعد الشحن. شكراً لكم.',
+  default_sewing_instructions:
+    'تم التأكد من أعداد الإكسسوارات ومطابقتها للمواصفات الفنية وعينة الاعتماد قبل التسليم للورشة.\nيرجى الالتزام التام بمقاسات القص والتشطيب النظيف وموعد الاستلام المتوقع.',
+  internal_message_templates: [
+    'يرجى سرعة مراجعة واعتماد الموديل المحول لقسمكم.',
+    'تم الانتهاء من المرحلة الحالية وجارٍ تسليم القطع للقسم التالي.',
+    'تنبيه: يوجد نقص في بعض المستلزمات، يرجى المراجعة العاجلة.'
+  ]
+};
+
 interface AppContextType {
   currentUser: User | null;
   setCurrentUser: (user: User | null) => void;
@@ -43,6 +60,17 @@ interface AppContextType {
   logout: () => void;
   refreshState: () => Promise<void>;
   isLoadingState: boolean;
+  globalSettings: GlobalSiteSettings;
+  updateGlobalSettings: (updates: Partial<GlobalSiteSettings>) => Promise<boolean>;
+  formatSupplierWhatsappMessage: (params: {
+    supplierName?: string;
+    itemName: string;
+    code: string;
+    quantity: number | string;
+    unit: string;
+    available: number | string;
+    modelCode?: string;
+  }) => string;
   users: User[];
   roles: CustomRole[];
   auditLogs: AuditLog[];
@@ -71,11 +99,31 @@ interface AppContextType {
   updateRole: (id: string, updates: Partial<CustomRole>) => void;
   deleteRole: (id: string) => { success: boolean; message: string };
 
-  // Permission helper with all system sections + legacy shortcuts
+  // Permission helper with all system sections + fine-grained checks
   hasPermission: (
     module: SystemSectionKey | 'warehouse' | 'design' | 'cutting' | 'qc' | 'reports',
     requireEdit?: boolean
   ) => boolean;
+  hasSpecificPermission: (permKey: keyof RolePermissions | string) => boolean;
+
+  // Dynamic Administrative & Global Settings Permission Checkers (Tasks 2 & 3)
+  canManagePermissions: () => boolean;
+  canManageUsers: () => boolean;
+  canManageSuppliers: () => boolean;
+  canManageSizes: () => boolean;
+  canViewAuditLogs: () => boolean;
+  canViewGlobalSettings: () => boolean;
+  canEditHeaderSettings: () => boolean;
+  canEditMessageTemplates: () => boolean;
+  canAccessSettings: () => boolean;
+
+  // Department Notes Permission Checkers (Task 4)
+  canAddDesignNotes: () => boolean;
+  canAddCuttingNotes: () => boolean;
+  canAddQCBeforePrintNotes: () => boolean;
+  canAddQCAfterPrintNotes: () => boolean;
+  canAddSewingNotes: () => boolean;
+  canAddPrintingNotes: () => boolean;
 
   // Internal Messaging System
   internalMessages: InternalMessage[];
@@ -154,6 +202,7 @@ interface AppContextType {
     sizeCategoryId?: string;
     imageUrl?: string;
     targetCutQuantity?: number;
+    designNotes?: string;
     notesShirt?: string;
     notesPants?: string;
   }) => { success: boolean; message: string; modelId?: string };
@@ -163,6 +212,7 @@ interface AppContextType {
     accQuantities: Record<string, number>;
     mainMarkerUrl?: string;
     printMarkerUrl?: string;
+    designNotes?: string;
     notesShirt?: string;
     notesPants?: string;
     targetCutQuantity?: number;
@@ -171,6 +221,7 @@ interface AppContextType {
     modelId: string,
     data: {
       target_cut_quantity?: number;
+      design_notes?: string;
       notes_shirt?: string;
       notes_pants?: string;
     }
@@ -203,8 +254,9 @@ interface AppContextType {
     layerWeight: number;
     piecesCount: number;
     shadeDegree?: string;
+    notes?: string;
   }) => void;
-  finishCuttingToQC: (modelId: string) => void;
+  finishCuttingToQC: (modelId: string, notes?: string) => void;
   exportCuttingCsv: (modelId: string) => void;
 
   // QC Actions & Multi-stage counting
@@ -252,7 +304,7 @@ interface AppContextType {
     pieceLabel?: string;
     notes?: string;
   }) => void;
-  receiveModelFromSewing: (dispatchId: string, modelId?: string) => void;
+  receiveModelFromSewing: (dispatchId: string, modelId?: string, notes?: string) => void;
   finishSewingToQC: (modelId: string, notes?: string) => void;
   finishQCToProduction: (modelId: string, notes?: string) => void;
 
@@ -277,7 +329,6 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-// Clear legacy localStorage data keys so the browser never serves stale local data instead of backend data
 const LEGACY_STORAGE_KEYS = [
   'factory_erp_roles',
   'factory_erp_users',
@@ -301,7 +352,6 @@ const LEGACY_STORAGE_KEYS = [
 ];
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Clean up legacy local storage caches on mount
   useEffect(() => {
     try {
       LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
@@ -310,7 +360,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Only restore session if BOTH a valid auth token and user record exist in localStorage
   const [currentUser, setCurrentUserState] = useState<User | null>(() => {
     try {
       const token = localStorage.getItem('factory_erp_auth_token');
@@ -327,6 +376,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [isLoadingState, setIsLoadingState] = useState<boolean>(true);
+  const [globalSettings, setGlobalSettings] = useState<GlobalSiteSettings>(DEFAULT_GLOBAL_SETTINGS);
   const [roles, setRoles] = useState<CustomRole[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [sizeDefs, setSizeDefs] = useState<SizeDef[]>([]);
@@ -389,8 +439,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const state = await api.getState();
       if (state) {
+        if (state.globalSettings) {
+          setGlobalSettings({
+            ...DEFAULT_GLOBAL_SETTINGS,
+            ...state.globalSettings
+          });
+        }
         setRoles(Array.isArray(state.roles) ? state.roles : []);
-        setUsers(Array.isArray(state.users) ? state.users : []);
+        // Strictly filter out sudo from any frontend user list (Task 2)
+        const rawUsers: User[] = Array.isArray(state.users) ? state.users : [];
+        setUsers(
+          rawUsers.filter((u) => u.username?.toLowerCase() !== 'sudo' && !u.is_sudo)
+        );
         setSizeDefs(Array.isArray(state.sizeDefs) ? state.sizeDefs : []);
         setSuppliers(Array.isArray(state.suppliers) ? state.suppliers : []);
         setFabrics(Array.isArray(state.fabrics) ? state.fabrics : []);
@@ -409,7 +469,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setPrintDispatches(Array.isArray(state.printDispatches) ? state.printDispatches : []);
         setSewingDispatches(Array.isArray(state.sewingDispatches) ? state.sewingDispatches : []);
         setInternalMessages(Array.isArray(state.internalMessages) ? state.internalMessages : []);
-        setAuditLogs(Array.isArray(state.auditLogs) ? state.auditLogs : []);
+        const rawLogs: AuditLog[] = Array.isArray(state.auditLogs) ? state.auditLogs : [];
+        setAuditLogs(
+          rawLogs.filter(
+            (l) =>
+              l.userId?.toLowerCase() !== 'user-sudo' &&
+              !l.userName?.toLowerCase().includes('sudo')
+          )
+        );
       }
     } catch (err) {
       console.error('Failed to sync state from backend:', err);
@@ -418,7 +485,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Verify stored session token with the backend and load live database state on mount
   useEffect(() => {
     let isMounted = true;
 
@@ -480,6 +546,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [setCurrentUser]);
 
   const logAction = (action: string, details: string) => {
+    // Do not log sudo emergency account actions into visible audit logs (Task 2)
+    if (currentUser?.username?.toLowerCase() === 'sudo' || currentUser?.is_sudo) {
+      return;
+    }
     const newLog: AuditLog = {
       id: 'log-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
       userName: currentUser?.real_name || currentUser?.username || 'مستخدم غير معروف',
@@ -491,6 +561,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setAuditLogs((prev) => [newLog, ...prev.slice(0, 200)]);
     api.createAuditLog(newLog).catch((err) => console.error('AuditLog error:', err));
+  };
+
+  const updateGlobalSettings = async (updates: Partial<GlobalSiteSettings>): Promise<boolean> => {
+    const previous = { ...globalSettings };
+    const optimistic = { ...globalSettings, ...updates };
+    setGlobalSettings(optimistic);
+    try {
+      const saved = await api.updateGlobalSettings(updates);
+      setGlobalSettings({ ...DEFAULT_GLOBAL_SETTINGS, ...saved });
+      logAction('إعدادات الموقع العامة', 'تحديث إعدادات الموقع والرسائل الجاهزة');
+      addFlashMessage('تم حفظ الإعدادات العامة للموقع بنجاح');
+      return true;
+    } catch (err: any) {
+      setGlobalSettings(previous);
+      addFlashMessage(err?.message || 'فشل حفظ الإعدادات العامة في السيرفر', 'danger');
+      return false;
+    }
+  };
+
+  const formatSupplierWhatsappMessage = (params: {
+    supplierName?: string;
+    itemName: string;
+    code: string;
+    quantity: number | string;
+    unit: string;
+    available: number | string;
+    modelCode?: string;
+  }): string => {
+    const tpl =
+      globalSettings?.whatsapp_supplier_template ||
+      DEFAULT_GLOBAL_SETTINGS.whatsapp_supplier_template;
+    return tpl
+      .replace(/\{supplier_name\}/g, params.supplierName || 'حضرة المورد')
+      .replace(/\{item_name\}/g, params.itemName || '')
+      .replace(/\{code\}/g, params.code || '')
+      .replace(/\{quantity\}/g, String(params.quantity ?? ''))
+      .replace(/\{unit\}/g, params.unit || '')
+      .replace(/\{available\}/g, String(params.available ?? ''))
+      .replace(/\{model_code\}/g, params.modelCode || '');
   };
 
   const addModelTimelineEvent = (
@@ -579,7 +688,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Permission Resolver
   const getUserPermissionsObject = (): RolePermissions | null => {
     if (!currentUser) return null;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) {
+    if (currentUser.username?.toLowerCase() === 'sudo' || currentUser.is_sudo) {
       return {
         fabric_warehouse_view: true,
         fabric_warehouse_edit: true,
@@ -608,17 +717,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         view_printing_costs: true,
         edit_printing_costs: true,
         send_whatsapp_requests: true,
-        send_internal_messages: true
+        send_internal_messages: true,
+        manage_permissions: true,
+        manage_users: true,
+        manage_suppliers: true,
+        manage_sizes: true,
+        view_audit_logs: true,
+        view_global_settings: true,
+        edit_header_settings: true,
+        edit_message_templates: true,
+        can_add_design_notes: true,
+        can_add_cutting_notes: true,
+        can_add_qc_before_print_notes: true,
+        can_add_qc_after_print_notes: true,
+        can_add_sewing_notes: true,
+        can_add_printing_notes: true
       };
     }
 
+    let baseRolePerms: Partial<RolePermissions> = {};
     if (currentUser.role_id) {
       const role = roles.find((r) => r.id === currentUser.role_id);
-      if (role?.permissions) return role.permissions;
+      if (role?.permissions) baseRolePerms = { ...role.permissions };
+    } else {
+      const roleByName = roles.find((r) => r.name === currentUser.role);
+      if (roleByName?.permissions) baseRolePerms = { ...roleByName.permissions };
     }
-    const roleByName = roles.find((r) => r.name === currentUser.role);
-    if (roleByName?.permissions) return roleByName.permissions;
-    return null;
+
+    // Merge user-level custom_permissions on top of role permissions so any permission can be granted to any user!
+    if (currentUser.permissions && typeof currentUser.permissions === 'object') {
+      return { ...baseRolePerms, ...(currentUser.permissions as any) } as RolePermissions;
+    }
+
+    return Object.keys(baseRolePerms).length > 0 ? (baseRolePerms as RolePermissions) : null;
+  };
+
+  const hasSpecificPermission = (permKey: keyof RolePermissions | string): boolean => {
+    if (!currentUser) return false;
+    if (currentUser.username?.toLowerCase() === 'sudo' || currentUser.is_sudo) return true;
+
+    // 1. Check user-level custom_permissions first
+    const userCustom = currentUser.permissions as Record<string, any> | undefined;
+    if (userCustom && permKey in userCustom && userCustom[permKey] !== undefined) {
+      const val = userCustom[permKey];
+      if (typeof val === 'string') return val === 'edit' || val === 'view' || val === 'true';
+      return Boolean(val);
+    }
+
+    // 2. Check role permissions
+    const rolePerms = getUserPermissionsObject();
+    if (rolePerms && permKey in rolePerms) {
+      return Boolean((rolePerms as any)[permKey]);
+    }
+
+    return false;
   };
 
   const hasPermission = (
@@ -626,23 +778,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     requireEdit: boolean = false
   ): boolean => {
     if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
+    if (currentUser.username?.toLowerCase() === 'sudo' || currentUser.is_sudo) return true;
 
     const rolePerms = getUserPermissionsObject();
 
     if (module === 'warehouse') {
       if (rolePerms) {
         if (requireEdit) {
-          return (
+          return Boolean(
             rolePerms.fabric_warehouse_edit ||
-            rolePerms.accessories_warehouse_edit ||
-            rolePerms.production_warehouse_edit
+              rolePerms.accessories_warehouse_edit ||
+              rolePerms.production_warehouse_edit
           );
         }
-        return (
+        return Boolean(
           rolePerms.fabric_warehouse_view ||
-          rolePerms.accessories_warehouse_view ||
-          rolePerms.production_warehouse_view
+            rolePerms.accessories_warehouse_view ||
+            rolePerms.production_warehouse_view
         );
       }
       const lvl = currentUser.permissions?.warehouse;
@@ -651,11 +803,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const key = module as SystemSectionKey;
+    const viewKey = `${key}_view` as keyof RolePermissions;
+    const editKey = `${key}_edit` as keyof RolePermissions;
+
+    // Check explicit user overrides if present
+    const userCustom = currentUser.permissions as Record<string, any> | undefined;
+    if (userCustom) {
+      if (requireEdit && editKey in userCustom) return Boolean(userCustom[editKey]);
+      if (!requireEdit && viewKey in userCustom) return Boolean(userCustom[viewKey] || userCustom[editKey]);
+    }
+
     if (rolePerms) {
-      const viewKey = `${key}_view` as keyof RolePermissions;
-      const editKey = `${key}_edit` as keyof RolePermissions;
       if (requireEdit) return Boolean(rolePerms[editKey]);
-      return Boolean(rolePerms[viewKey]);
+      return Boolean(rolePerms[viewKey] || rolePerms[editKey]);
     }
 
     const legacyLevel = (currentUser.permissions as any)?.[module];
@@ -663,69 +823,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return requireEdit ? legacyLevel === 'edit' : true;
   };
 
-  const canViewFabricPrices = (): boolean => {
+  // Dynamic Administrative & Global Settings Checkers (Tasks 2 & 3)
+  const canManagePermissions = (): boolean => hasSpecificPermission('manage_permissions');
+  const canManageUsers = (): boolean =>
+    hasSpecificPermission('manage_users') || hasSpecificPermission('manage_permissions');
+  const canManageSuppliers = (): boolean =>
+    hasSpecificPermission('manage_suppliers') || hasSpecificPermission('manage_permissions');
+  const canManageSizes = (): boolean =>
+    hasSpecificPermission('manage_sizes') || hasSpecificPermission('manage_permissions');
+  const canViewAuditLogs = (): boolean =>
+    hasSpecificPermission('view_audit_logs') || hasSpecificPermission('manage_permissions');
+  const canViewGlobalSettings = (): boolean =>
+    hasSpecificPermission('view_global_settings') ||
+    hasSpecificPermission('edit_header_settings') ||
+    hasSpecificPermission('edit_message_templates') ||
+    hasSpecificPermission('manage_permissions');
+  const canEditHeaderSettings = (): boolean =>
+    hasSpecificPermission('edit_header_settings') || hasSpecificPermission('manage_permissions');
+  const canEditMessageTemplates = (): boolean =>
+    hasSpecificPermission('edit_message_templates') || hasSpecificPermission('manage_permissions');
+
+  const canAccessSettings = (): boolean => {
     if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.view_fabric_prices !== undefined) return p.view_fabric_prices;
-    return Boolean(currentUser.permissions?.view_fabric_prices);
+    if (currentUser.username?.toLowerCase() === 'sudo' || currentUser.is_sudo) return true;
+    return (
+      canManagePermissions() ||
+      canManageUsers() ||
+      canManageSuppliers() ||
+      canManageSizes() ||
+      canViewAuditLogs() ||
+      canViewGlobalSettings()
+    );
   };
 
-  const canEditFabricPrices = (): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.edit_fabric_prices !== undefined) return p.edit_fabric_prices;
-    return Boolean(currentUser.permissions?.edit_fabric_prices);
-  };
+  // Department Notes Permission Checkers (Task 4)
+  const canAddDesignNotes = (): boolean => hasSpecificPermission('can_add_design_notes');
+  const canAddCuttingNotes = (): boolean => hasSpecificPermission('can_add_cutting_notes');
+  const canAddQCBeforePrintNotes = (): boolean => hasSpecificPermission('can_add_qc_before_print_notes');
+  const canAddQCAfterPrintNotes = (): boolean => hasSpecificPermission('can_add_qc_after_print_notes');
+  const canAddSewingNotes = (): boolean => hasSpecificPermission('can_add_sewing_notes');
+  const canAddPrintingNotes = (): boolean => hasSpecificPermission('can_add_printing_notes');
 
-  const canViewAccessoryPrices = (): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.view_accessory_prices !== undefined) return p.view_accessory_prices;
-    return Boolean(currentUser.permissions?.view_accessory_prices);
-  };
-
-  const canEditAccessoryPrices = (): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.edit_accessory_prices !== undefined) return p.edit_accessory_prices;
-    return Boolean(currentUser.permissions?.edit_accessory_prices);
-  };
-
-  const canViewPrintingCosts = (): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.view_printing_costs !== undefined) return p.view_printing_costs;
-    return Boolean(currentUser.permissions?.view_printing_costs);
-  };
-
-  const canEditPrintingCosts = (): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.edit_printing_costs !== undefined) return p.edit_printing_costs;
-    return Boolean(currentUser.permissions?.edit_printing_costs);
-  };
-
-  const canSendWhatsApp = (): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.send_whatsapp_requests !== undefined) return p.send_whatsapp_requests;
-    return Boolean(currentUser.permissions?.send_whatsapp_requests);
-  };
-
-  const canSendMessages = (): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.username === 'sudo' || currentUser.is_sudo) return true;
-    const p = getUserPermissionsObject();
-    if (p && p.send_internal_messages !== undefined) return p.send_internal_messages;
-    return Boolean(currentUser.permissions?.send_internal_messages);
-  };
+  // Financial & Communication Permission Checkers
+  const canViewFabricPrices = (): boolean => hasSpecificPermission('view_fabric_prices');
+  const canEditFabricPrices = (): boolean => hasSpecificPermission('edit_fabric_prices');
+  const canViewAccessoryPrices = (): boolean => hasSpecificPermission('view_accessory_prices');
+  const canEditAccessoryPrices = (): boolean => hasSpecificPermission('edit_accessory_prices');
+  const canViewPrintingCosts = (): boolean => hasSpecificPermission('view_printing_costs');
+  const canEditPrintingCosts = (): boolean => hasSpecificPermission('edit_printing_costs');
+  const canSendWhatsApp = (): boolean => hasSpecificPermission('send_whatsapp_requests');
+  const canSendMessages = (): boolean => hasSpecificPermission('send_internal_messages');
 
   const unreadMessagesCount = useMemo(() => {
     if (!currentUser) return 0;
@@ -741,7 +888,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): { success: boolean; message: string } => {
     if (!canSendMessages()) {
       addFlashMessage(
-        'ليس لديك صلاحية إرسال الرسائل والمراسلات الداخلية. يرجى مراجعة إدارة Sudo.',
+        'ليس لديك صلاحية إرسال الرسائل والمراسلات الداخلية. يرجى مراجعة مسؤول الصلاحيات.',
         'danger'
       );
       return { success: false, message: 'ليس لديك صلاحية إرسال الرسائل الداخلية' };
@@ -757,7 +904,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newMsg: InternalMessage = {
       id: 'msg-' + Date.now(),
       sender_id: currentUser?.id || 'user-sudo',
-      sender_name: currentUser?.real_name || 'الإدارة العليا (Sudo)',
+      sender_name: currentUser?.real_name || 'إدارة النظام',
       receiver_id: receiver.id,
       receiver_name: receiver.real_name,
       content: content.trim(),
@@ -1278,6 +1425,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     sizeCategoryId?: string;
     imageUrl?: string;
     targetCutQuantity?: number;
+    designNotes?: string;
     notesShirt?: string;
     notesPants?: string;
   }) => {
@@ -1290,6 +1438,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newModelId = 'mod-' + Date.now();
     const targetCutQty = data.targetCutQuantity || 100;
+    const allowedDesignNotes = canAddDesignNotes() ? (data.designNotes || '') : '';
+    const allowedShirtNotes = canAddDesignNotes() ? (data.notesShirt || '') : '';
+    const allowedPantsNotes = canAddDesignNotes() ? (data.notesPants || '') : '';
+    const userName = currentUser?.real_name || 'مسؤول التصميم';
 
     const newModel: DesignModel = {
       id: newModelId,
@@ -1303,8 +1455,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       main_marker_url: '',
       print_marker_url: '',
       target_cut_quantity: targetCutQty,
-      notes_shirt: data.notesShirt || '',
-      notes_pants: data.notesPants || '',
+      design_notes: allowedDesignNotes,
+      notes_shirt: allowedShirtNotes,
+      notes_pants: allowedPantsNotes,
       created_at: new Date().toISOString(),
       is_deleted: false,
       timeline: [
@@ -1312,9 +1465,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           id: 'tl-' + Date.now(),
           stage: 'مرحلة التصميم',
           title: 'إنشاء الموديل الجديد',
-          description: `تم إنشاء الموديل بالعدد المستهدف للقص: ${targetCutQty} قطعة`,
-          user_name: currentUser?.real_name || 'مسؤول التصميم',
-          timestamp: new Date().toLocaleString('ar-EG', { hour12: false })
+          description: `تم إنشاء الموديل بالعدد المستهدف للقص: ${targetCutQty} قطعة${allowedDesignNotes ? ` | ملاحظات التصميم: ${allowedDesignNotes}` : ''}`,
+          user_name: userName,
+          timestamp: new Date().toLocaleString('ar-EG', { hour12: false }),
+          details: {
+            phase_type: 'design',
+            model_code: cleanCode,
+            model_type: data.modelType,
+            target_cut_quantity: targetCutQty,
+            design_notes: allowedDesignNotes,
+            notes_shirt: allowedShirtNotes,
+            notes_pants: allowedPantsNotes,
+            operator_name: userName,
+            worker_notes: allowedDesignNotes || allowedShirtNotes || allowedPantsNotes
+          }
         }
       ]
     };
@@ -1328,9 +1492,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         size_category_id: data.sizeCategoryId,
         image: newModel.image,
         target_cut_quantity: targetCutQty,
-        notes_shirt: data.notesShirt || '',
-        notes_pants: data.notesPants || '',
-        user_name: currentUser?.real_name || 'مسؤول التصميم'
+        design_notes: allowedDesignNotes,
+        notes_shirt: allowedShirtNotes,
+        notes_pants: allowedPantsNotes,
+        user_name: userName
       })
       .then((saved) => {
         setModels((prev) => prev.map((m) => (m.id === newModelId ? saved : m)));
@@ -1351,12 +1516,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     accQuantities: Record<string, number>;
     mainMarkerUrl?: string;
     printMarkerUrl?: string;
+    designNotes?: string;
     notesShirt?: string;
     notesPants?: string;
     targetCutQuantity?: number;
   }) => {
     const model = models.find((m) => m.id === data.modelId);
     if (!model) return { success: false, message: 'الموديل غير موجود' };
+
+    const allowNotes = canAddDesignNotes();
 
     setRequirements((prev) =>
       prev.map((r) => {
@@ -1381,15 +1549,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...m,
           main_marker_url: data.mainMarkerUrl ?? m.main_marker_url,
           print_marker_url: data.printMarkerUrl ?? m.print_marker_url,
-          notes_shirt: data.notesShirt ?? m.notes_shirt,
-          notes_pants: data.notesPants ?? m.notes_pants,
+          ...(allowNotes
+            ? {
+                design_notes: data.designNotes ?? m.design_notes,
+                notes_shirt: data.notesShirt ?? m.notes_shirt,
+                notes_pants: data.notesPants ?? m.notes_pants
+              }
+            : {}),
           target_cut_quantity: data.targetCutQuantity ?? m.target_cut_quantity
         };
       })
     );
 
     api
-      .updateModelPlan(data.modelId, data)
+      .updateModelPlan(data.modelId, {
+        ...data,
+        ...(allowNotes
+          ? {}
+          : {
+              designNotes: model.design_notes,
+              notesShirt: model.notes_shirt,
+              notesPants: model.notes_pants
+            })
+      })
       .then((savedModel) => {
         setModels((prev) => prev.map((m) => (m.id === data.modelId ? savedModel : m)));
         logAction('التصميم', `تحديث خطة وخامات الموديل ${model.model_code}`);
@@ -1407,25 +1589,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     modelId: string,
     data: {
       target_cut_quantity?: number;
+      design_notes?: string;
       notes_shirt?: string;
       notes_pants?: string;
     }
   ) => {
+    const allowNotes = canAddDesignNotes();
+    const filteredData = {
+      ...(data.target_cut_quantity !== undefined ? { target_cut_quantity: data.target_cut_quantity } : {}),
+      ...(allowNotes && data.design_notes !== undefined ? { design_notes: data.design_notes } : {}),
+      ...(allowNotes && data.notes_shirt !== undefined ? { notes_shirt: data.notes_shirt } : {}),
+      ...(allowNotes && data.notes_pants !== undefined ? { notes_pants: data.notes_pants } : {})
+    };
+
     setModels((prev) =>
       prev.map((m) => {
         if (m.id !== modelId) return m;
         return {
           ...m,
-          ...(data.target_cut_quantity !== undefined
-            ? { target_cut_quantity: data.target_cut_quantity }
-            : {}),
-          ...(data.notes_shirt !== undefined ? { notes_shirt: data.notes_shirt } : {}),
-          ...(data.notes_pants !== undefined ? { notes_pants: data.notes_pants } : {})
+          ...filteredData
         };
       })
     );
     api
-      .updateModel(modelId, data)
+      .updateModel(modelId, filteredData)
       .then((saved) => {
         setModels((prev) => prev.map((m) => (m.id === modelId ? saved : m)));
         addFlashMessage('تم تحديث بيانات وملاحظات التشغيل بنجاح');
@@ -1581,9 +1768,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     layerWeight: number;
     piecesCount: number;
     shadeDegree?: string;
+    notes?: string;
   }) => {
     const recId = 'cut-' + Date.now();
     const createdAt = new Date().toLocaleString('ar-EG', { hour12: false });
+    const cleanNotes = canAddCuttingNotes() ? (data.notes?.trim() || '') : '';
     const newRecord: CuttingRecord = {
       id: recId,
       model_id: data.modelId,
@@ -1599,6 +1788,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       piecesCount: Math.max(0, data.piecesCount),
       shade_degree: data.shadeDegree?.trim() || '',
       shadeDegree: data.shadeDegree?.trim() || '',
+      notes: cleanNotes,
       created_at: createdAt
     };
     setCuttingRecords((prev) => [newRecord, ...prev]);
@@ -1607,11 +1797,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((m) => {
         if (m.id !== data.modelId) return m;
         const newTotal = (m.actual_cut_count || 0) + data.piecesCount;
+        const tlEvent: ModelTimelineEvent = {
+          id: 'tl-' + Date.now(),
+          stage: 'في القص',
+          title: `تسجيل راق قص (${data.piecesCount} قطعة)`,
+          notes: `بواسطة المقصدار: ${data.cutterName.trim()} | اللون/القطعة: ${data.colorName} | عدد الراقات: ${data.layersCount} | وزن الراق: ${data.layerWeight} كجم${cleanNotes ? ` | ملاحظات: ${cleanNotes}` : ''}`,
+          user: data.cutterName.trim(),
+          timestamp: createdAt,
+          details: {
+            phase_type: 'cutting',
+            record_id: recId,
+            color_name: data.colorName,
+            cutter_name: data.cutterName.trim(),
+            layers_count: data.layersCount,
+            layer_weight: data.layerWeight,
+            pieces_count: data.piecesCount,
+            total_cut_pieces_so_far: newTotal,
+            shade_degree: data.shadeDegree?.trim() || '',
+            worker_notes: cleanNotes,
+            operator_name: data.cutterName.trim()
+          }
+        };
         return {
           ...m,
           actual_cut_count: newTotal,
           total_cut_pieces: newTotal,
-          cutter_name: data.cutterName.trim()
+          cutter_name: data.cutterName.trim(),
+          timeline: [tlEvent, ...(m.timeline || [])]
         };
       })
     );
@@ -1626,6 +1838,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         layer_weight: Math.max(0, data.layerWeight),
         pieces_count: Math.max(0, data.piecesCount),
         shade_degree: data.shadeDegree?.trim() || '',
+        notes: cleanNotes,
         created_at: createdAt
       })
       .then((saved) => {
@@ -1639,14 +1852,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
   };
 
-  const finishCuttingToQC = (modelId: string) => {
+  const finishCuttingToQC = (modelId: string, notes?: string) => {
     const model = models.find((m) => m.id === modelId);
+    const cleanNotes = canAddCuttingNotes() ? (notes?.trim() || '') : '';
     setModels((prev) =>
       prev.map((m) => (m.id === modelId ? { ...m, status: 'العد قبل الطباعة' } : m))
     );
 
     api
-      .finishCuttingToQC(modelId, currentUser?.real_name || 'مسؤول القص')
+      .finishCuttingToQC(modelId, currentUser?.real_name || 'مسؤول القص', cleanNotes)
       .then((savedModel) => {
         setModels((prev) => prev.map((m) => (m.id === modelId ? savedModel : m)));
         logAction('القص', `إنهاء قص الموديل ${model?.model_code} وتحويله للعد والفرز قبل الطباعة`);
@@ -1669,6 +1883,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'وزن الراق (كجم)',
       'القطع المنتجة',
       'درجة الصبغة',
+      'الملاحظات',
       'تاريخ ووقت التسجيل'
     ];
     const rows = records.map((r) => [
@@ -1679,6 +1894,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       r.layer_weight.toString(),
       r.pieces_count.toString(),
       r.shade_degree || '-',
+      r.notes || '-',
       r.created_at
     ]);
 
@@ -1713,8 +1929,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     defectNotes?: string;
     stage?: QCStageType;
   }) => {
-    const cleanNotes = data.defectNotes?.trim() || '';
     const stage = data.stage || 'before_print';
+    const allowNotes =
+      stage === 'before_print' ? canAddQCBeforePrintNotes() : canAddQCAfterPrintNotes();
+    const cleanNotes = allowNotes ? (data.defectNotes?.trim() || '') : '';
     const qcId = 'qc-' + Date.now();
     const createdAt = new Date().toLocaleString('ar-EG', { hour12: false });
 
@@ -1727,6 +1945,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       good_qty: Math.max(0, data.goodQty),
       defect_qty: Math.max(0, data.defectQty),
       defect_notes: cleanNotes,
+      notes: cleanNotes,
       inspector_name: currentUser?.real_name || 'مراقب الجودة',
       created_at: createdAt
     };
@@ -1767,7 +1986,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const model = models.find((m) => m.id === data.modelId);
     if (!model) return;
 
+    const allowNotes =
+      data.stage === 'before_print' ? canAddQCBeforePrintNotes() : canAddQCAfterPrintNotes();
+    const cleanNotes = allowNotes ? (data.defectNotes?.trim() || '') : '';
     const qcId = 'qc-' + Date.now();
+    const createdAt = new Date().toLocaleString('ar-EG', { hour12: false });
+    const inspector = currentUser?.real_name || 'مراقب الجودة';
+
     const newQC: QCRecord = {
       id: qcId,
       model_id: data.modelId,
@@ -1776,9 +2001,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pieces_cut: model.actual_cut_count || model.target_cut_quantity,
       good_qty: data.piecesCounted,
       defect_qty: data.defectQty,
-      defect_notes: data.defectNotes || '',
-      inspector_name: currentUser?.real_name || 'مراقب الجودة',
-      created_at: new Date().toLocaleString('ar-EG', { hour12: false })
+      defect_notes: cleanNotes,
+      notes: cleanNotes,
+      inspector_name: inspector,
+      created_at: createdAt
     };
     setQcRecords((prev) => [newQC, ...prev]);
 
@@ -1813,9 +2039,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stage: data.stage,
         counted_pieces: data.piecesCounted,
         defect_pieces: data.defectQty,
-        notes: data.defectNotes || '',
+        notes: cleanNotes,
         advanceStage: data.advanceStage,
-        user_name: currentUser?.real_name || 'مراقب الجودة'
+        user_name: inspector
       })
       .then((res) => {
         if (res.model) {
@@ -1911,6 +2137,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetModel = models.find((m) => m.id === data.modelId);
     const dispId = 'disp-' + Date.now();
     const dispatchedAt = new Date().toLocaleString('ar-EG', { hour12: false });
+    const cleanNotes = canAddPrintingNotes() || canAddQCBeforePrintNotes() ? (data.notes?.trim() || '') : '';
 
     const newDisp: PrintDispatch = {
       id: dispId,
@@ -1923,7 +2150,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cost_per_piece: data.costPerPiece,
       total_cost:
         data.totalCost || (data.costPerPiece ? data.costPerPiece * data.piecesCount : undefined),
-      notes: data.notes?.trim() || '',
+      notes: cleanNotes,
       status: 'مرسل للمطبعة'
     };
     setPrintDispatches((prev) => [newDisp, ...prev]);
@@ -1952,11 +2179,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         cost_per_piece: data.costPerPiece || 0,
         expected_delivery_date: data.expectedDeliveryDate || null,
         dispatched_at: dispatchedAt,
-        notes: data.notes?.trim() || '',
+        notes: cleanNotes,
         user_name: currentUser?.real_name || 'مسؤول المطابع'
       })
       .then((saved) => {
         setPrintDispatches((prev) => prev.map((d) => (d.id === dispId ? saved : d)));
+        refreshState();
         logAction(
           'المطابع والتطريز',
           `إرسال ${data.piecesCount} قطعة من موديل ${targetModel?.model_code} إلى ${data.shopName}`
@@ -1994,6 +2222,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .updatePrintDispatchStatus(dispatchId, status, currentUser?.real_name || 'مسؤول المطابع')
       .then((saved) => {
         setPrintDispatches((prev) => prev.map((d) => (d.id === dispatchId ? saved : d)));
+        refreshState();
         logAction('المطابع والتطريز', `تحديث حالة الإرسالية إلى: ${status}`);
         addFlashMessage(`تم تحديث حالة التشغيل إلى "${status}" بنجاح`);
       })
@@ -2017,6 +2246,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const resolvedType = data.pieceType || 'shirt';
     const resolvedLabel = data.pieceLabel || (resolvedType === 'shirt' ? 'تيشرت' : 'بنطلون');
     const dispId = 'sew-disp-' + Date.now();
+    const cleanNotes = canAddSewingNotes() ? (data.notes?.trim() || '') : '';
 
     const newDisp: SewingDispatch = {
       id: dispId,
@@ -2028,7 +2258,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatched_at: new Date().toLocaleString('ar-EG', { hour12: false }),
       expected_delivery_date: data.expectedDeliveryDate,
       status: 'في ورشة المكن',
-      notes: data.notes?.trim() || ''
+      notes: cleanNotes
     };
     setSewingDispatches((prev) => [newDisp, ...prev]);
 
@@ -2064,11 +2294,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         expected_delivery_date: data.expectedDeliveryDate,
         piece_type: resolvedType,
         piece_label: resolvedLabel,
-        notes: data.notes?.trim() || '',
+        notes: cleanNotes,
         user_name: currentUser?.real_name || 'مسؤول خطوط الخياطة'
       })
       .then((saved) => {
         setSewingDispatches((prev) => prev.map((d) => (d.id === dispId ? saved : d)));
+        refreshState();
         logAction(
           'قسم المكن',
           `إرسال ${data.piecesCount} قطعة [${resolvedLabel}] من موديل ${targetModel?.model_code} إلى ورشة ${data.workshopName}`
@@ -2081,20 +2312,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
   };
 
-  const receiveModelFromSewing = (dispatchId: string, modelId?: string) => {
+  const receiveModelFromSewing = (dispatchId: string, modelId?: string, notes?: string) => {
     const disp = sewingDispatches.find((d) => d.id === dispatchId);
     const targetModelId = modelId || disp?.model_id;
     if (!targetModelId) return;
     const targetModel = models.find((m) => m.id === targetModelId);
     const pieceType = disp?.piece_type || 'shirt';
     const pieceLabel = disp?.piece_label || (pieceType === 'shirt' ? 'تيشرت' : 'بنطلون');
+    const cleanNotes = canAddSewingNotes() ? (notes?.trim() || '') : '';
 
     const updatedDispatches = sewingDispatches.map((d) => {
       if (d.id !== dispatchId) return d;
       return {
         ...d,
         status: 'تم الاستلام' as const,
-        received_at: new Date().toLocaleString('ar-EG', { hour12: false })
+        received_at: new Date().toLocaleString('ar-EG', { hour12: false }),
+        ...(cleanNotes ? { notes: `${d.notes || ''} | استلام: ${cleanNotes}`.replace(/^\s*\|\s*/, '') } : {})
       };
     });
     setSewingDispatches(updatedDispatches);
@@ -2121,9 +2354,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     api
-      .receiveFromSewing(dispatchId, currentUser?.real_name || 'مسؤول الإنتاج')
+      .receiveFromSewing(dispatchId, currentUser?.real_name || 'مسؤول الإنتاج', cleanNotes)
       .then((saved) => {
         setSewingDispatches((prev) => prev.map((d) => (d.id === dispatchId ? saved : d)));
+        refreshState();
         logAction(
           'قسم المكن',
           `استلام [${pieceLabel}] موديل ${targetModel?.model_code} من ورشة ${disp?.workshop_name}`
@@ -2142,13 +2376,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const finishSewingToQC = (modelId: string, notes?: string) => {
     const targetModel = models.find((m) => m.id === modelId);
+    const cleanNotes = canAddSewingNotes() ? (notes?.trim() || '') : '';
     setModels((prev) =>
       prev.map((m) => (m.id === modelId ? { ...m, status: 'العد بعد المكن' } : m))
     );
 
     api
       .finishSewingToQC(modelId, {
-        notes,
+        notes: cleanNotes,
         user_name: currentUser?.real_name || 'مسؤول قسم المكن'
       })
       .then((saved) => {
@@ -2164,13 +2399,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const finishQCToProduction = (modelId: string, notes?: string) => {
     const targetModel = models.find((m) => m.id === modelId);
+    const cleanNotes = canAddQCAfterPrintNotes() ? (notes?.trim() || '') : '';
     setModels((prev) =>
       prev.map((m) => (m.id === modelId ? { ...m, status: 'مخزن الإنتاج التام' } : m))
     );
 
     api
       .finishQCToProduction(modelId, {
-        notes,
+        notes: cleanNotes,
         user_name: currentUser?.real_name || 'مراقب الجودة'
       })
       .then((saved) => {
@@ -2226,8 +2462,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addUser = (userData: Omit<User, 'id'>) => {
+    if (userData.username.trim().toLowerCase() === 'sudo') {
+      addFlashMessage('اسم المستخدم هذا محجوز للنظام ولا يمكن استخدامه', 'danger');
+      return;
+    }
     const newUser: User = {
       ...userData,
+      is_sudo: false,
       id: 'user-' + Date.now()
     };
     setUsers((prev) => [...prev, newUser]);
@@ -2247,8 +2488,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleUserActive = (userId: string) => {
     const targetUser = users.find((u) => u.id === userId);
     if (!targetUser) return { success: false, message: 'المستخدم غير موجود' };
-    if (targetUser.username === 'sudo' || targetUser.is_sudo) {
-      return { success: false, message: 'لا يمكن تعطيل حساب الإدارة العليا (Sudo)' };
+    if (targetUser.username?.toLowerCase() === 'sudo' || targetUser.is_sudo) {
+      return { success: false, message: 'لا يمكن تعطيل حساب الطوارئ المطلق' };
     }
 
     const nextState = !targetUser.is_active;
@@ -2279,12 +2520,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     newRole?: string,
     roleId?: string
   ) => {
+    const target = users.find((u) => u.id === userId);
+    if (target && (target.username?.toLowerCase() === 'sudo' || target.is_sudo)) {
+      addFlashMessage('حساب الطوارئ المطلق غير قابل للتعديل', 'danger');
+      return;
+    }
+
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id !== userId) return u;
         return {
           ...u,
-          permissions: { ...u.permissions, ...permissions },
+          permissions: { ...permissions },
           ...(newRole ? { role: newRole } : {}),
           ...(roleId ? { role_id: roleId } : {})
         };
@@ -2304,7 +2551,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setCurrentUser(saved);
         }
         logAction('إدارة الحسابات', `تحديث بيانات وصلاحيات الموظف (ID: ${userId})`);
-        addFlashMessage('تم حفظ تعديلات المستخدم في قاعدة البيانات بنجاح');
+        addFlashMessage('تم حفظ تعديلات وصلاحيات المستخدم في قاعدة البيانات بنجاح');
       })
       .catch((err) => {
         refreshState();
@@ -2315,8 +2562,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteUser = (userId: string) => {
     const target = users.find((u) => u.id === userId);
     if (!target) return { success: false, message: 'المستخدم غير موجود' };
-    if (target.username === 'sudo' || target.is_sudo) {
-      return { success: false, message: 'لا يمكن حذف حساب الإدارة العليا (Sudo)' };
+    if (target.username?.toLowerCase() === 'sudo' || target.is_sudo) {
+      return { success: false, message: 'لا يمكن حذف حساب الطوارئ المطلق' };
     }
     const previousUsers = [...users];
     setUsers((prev) => prev.filter((u) => u.id !== userId));
@@ -2485,6 +2732,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logout,
         refreshState,
         isLoadingState,
+        globalSettings,
+        updateGlobalSettings,
+        formatSupplierWhatsappMessage,
         users,
         roles,
         auditLogs,
@@ -2511,6 +2761,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateRole,
         deleteRole,
         hasPermission,
+        hasSpecificPermission,
+        canManagePermissions,
+        canManageUsers,
+        canManageSuppliers,
+        canManageSizes,
+        canViewAuditLogs,
+        canViewGlobalSettings,
+        canEditHeaderSettings,
+        canEditMessageTemplates,
+        canAccessSettings,
+        canAddDesignNotes,
+        canAddCuttingNotes,
+        canAddQCBeforePrintNotes,
+        canAddQCAfterPrintNotes,
+        canAddSewingNotes,
+        canAddPrintingNotes,
         canViewFabricPrices,
         canEditFabricPrices,
         canViewAccessoryPrices,

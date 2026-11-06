@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    Role, UserProfile, SizeDef, Supplier,
+    GlobalSettings, Role, UserProfile, SizeDef, Supplier,
     Fabric, FabricColor, FabricTransaction,
     AccessoryType, Accessory, AccessoryTransaction,
     ModelItem, ModelRequirement, ModelAccessory, ModelTimeline,
@@ -27,6 +27,26 @@ def get_ext_id(obj) -> str:
     return obj.client_id or str(obj.id)
 
 
+class GlobalSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GlobalSettings
+        fields = '__all__'
+
+    def to_representation(self, instance):
+        return {
+            'id': str(instance.id),
+            'site_name': instance.site_name or 'نظام إدارة المصنع',
+            'logo': instance.logo or '🏭',
+            'footer_title': instance.footer_title or '🏭 نظام إدارة المصنع المتكامل - مصانع الملابس الجاهزة (ERP v2.0)',
+            'copyright_text': instance.copyright_text or f'تم التطوير لدعم دورة الإنتاج الشاملة والصلاحيات المتقدمة © {instance.updated_at.year if instance.updated_at else 2026}',
+            'whatsapp_supplier_template': instance.whatsapp_supplier_template or '',
+            'default_sewing_instructions': instance.default_sewing_instructions or '',
+            'internal_message_templates': instance.internal_message_templates if isinstance(instance.internal_message_templates, list) else [],
+            'updated_by': instance.updated_by or '',
+            'updated_at': instance.updated_at.isoformat() if instance.updated_at else '',
+        }
+
+
 class RoleSerializer(serializers.ModelSerializer):
     permissions = serializers.JSONField(required=False)
     users_count = serializers.SerializerMethodField()
@@ -36,7 +56,7 @@ class RoleSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def get_users_count(self, obj):
-        return obj.users.count()
+        return obj.users.exclude(username__iexact='sudo').exclude(is_sudo=True).count()
 
     def to_representation(self, instance):
         return {
@@ -44,7 +64,7 @@ class RoleSerializer(serializers.ModelSerializer):
             'name': instance.name,
             'description': instance.description or '',
             'permissions': instance.get_permissions_dict(),
-            'users_count': instance.users.count(),
+            'users_count': self.get_users_count(instance),
             'created_at': instance.created_at.isoformat() if instance.created_at else '',
         }
 
@@ -70,7 +90,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'phone': instance.phone or '',
             'role': role_name,
             'role_id': role_ext_id,
-            'is_sudo': bool(instance.is_sudo or instance.username == 'sudo'),
+            'is_sudo': bool(instance.is_sudo or instance.username.lower() == 'sudo'),
             'permissions': instance.custom_permissions or {},
             'is_active': bool(instance.is_active),
             'last_active': instance.last_active.isoformat() if instance.last_active else None,
@@ -272,6 +292,7 @@ class ModelTimelineSerializer(serializers.ModelSerializer):
             'user_name': instance.user or 'النظام',
             'user': instance.user or 'النظام',
             'timestamp': ts,
+            'details': instance.details if isinstance(instance.details, dict) else {},
         }
 
 
@@ -297,6 +318,7 @@ class CuttingRecordSerializer(serializers.ModelSerializer):
             'piecesCount': int(instance.pieces_count or 0),
             'shade_degree': instance.shade_degree or '',
             'shadeDegree': instance.shade_degree or '',
+            'notes': instance.notes or '',
             'created_at': ts,
         }
 
@@ -427,6 +449,7 @@ class ModelItemSerializer(serializers.ModelSerializer):
             'sewing_pants_expected_date': instance.sewing_pants_expected_date.isoformat() if instance.sewing_pants_expected_date else None,
             'sewing_pants_status': instance.sewing_pants_status or 'ready',
             'sewing_pants_pieces': int(instance.sewing_pants_pieces or 0),
+            'design_notes': instance.design_notes or '',
             'notes_shirt': instance.notes_shirt or '',
             'notes_pants': instance.notes_pants or '',
             'colored_at': instance.colored_at or None,

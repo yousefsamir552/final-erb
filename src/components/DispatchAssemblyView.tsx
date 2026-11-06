@@ -5,13 +5,9 @@ import {
   Plus,
   Truck,
   CheckCircle2,
-  Clock,
   Layers,
-  Building,
-  Calendar,
   X,
-  Coins,
-  ArrowRight
+  Lock
 } from 'lucide-react';
 import { DispatchStatus } from '../types';
 
@@ -24,10 +20,13 @@ export const DispatchAssemblyView: React.FC = () => {
     updateDispatchStatus,
     hasPermission,
     canViewPrintingCosts,
-    canEditPrintingCosts
+    canEditPrintingCosts,
+    canAddPrintingNotes,
+    canAddQCBeforePrintNotes
   } = useApp();
 
   const canEdit = hasPermission('printing', true) || hasPermission('qc', true) || hasPermission('cutting', true);
+  const allowPrintNotes = canAddPrintingNotes() || canAddQCBeforePrintNotes();
 
   // Models ready to send to print house
   const readyModels = models.filter(
@@ -58,7 +57,7 @@ export const DispatchAssemblyView: React.FC = () => {
       printType: printType.trim(),
       expectedDeliveryDate,
       costPerPiece: canEditPrintingCosts() ? Number(costPerPiece) : undefined,
-      notes: notes.trim()
+      notes: allowPrintNotes ? notes.trim() : ''
     });
 
     setShowModal(false);
@@ -444,15 +443,30 @@ export const DispatchAssemblyView: React.FC = () => {
                 </span>
               </div>
 
+              {/* Notes gated by permission */}
               <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">ملاحظات التشغيل</label>
-                <textarea
-                  rows={2}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="مثال: يرجى تسليم العينة الأولى للاعتماد قبل إتمام الكمية..."
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-teal-700 focus:outline-hidden"
-                ></textarea>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-600">ملاحظات التشغيل (اختياري)</label>
+                  {!allowPrintNotes && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                      <Lock className="w-3 h-3" />
+                      <span>يتطلب صلاحية تسجيل ملاحظات المطابع</span>
+                    </span>
+                  )}
+                </div>
+                {allowPrintNotes ? (
+                  <textarea
+                    rows={2}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="مثال: يرجى تسليم العينة الأولى للاعتماد قبل إتمام الكمية..."
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-teal-700 focus:outline-hidden"
+                  ></textarea>
+                ) : (
+                  <div className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-[11px] text-slate-400">
+                    إدخال الملاحظات غير مفعل لحسابك حالياً.
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">

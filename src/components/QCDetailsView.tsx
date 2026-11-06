@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Search, ArrowRight, Printer, CheckCircle2, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import {
+  Search,
+  ArrowRight,
+  Printer,
+  CheckCircle2,
+  FileSpreadsheet,
+  FileText,
+  Lock
+} from 'lucide-react';
 
 interface QCDetailsViewProps {
   modelId: string;
@@ -22,19 +30,20 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
     addQCRecord,
     finishQCApproval,
     exportQcCsv,
-    hasPermission
+    hasPermission,
+    canAddQCBeforePrintNotes,
+    globalSettings
   } = useApp();
 
   const canEdit = hasPermission('qc', true);
+  const canWriteNotes = canAddQCBeforePrintNotes();
   const model = models.find((m) => m.id === modelId);
 
-  // Model size definitions list
   const sizeCat = sizeDefs.find((s) => s.id === model?.size_category_id);
   const sizeList = sizeCat
     ? sizeCat.values.split(',').map((s) => s.trim()).filter(Boolean)
     : ['S', 'M', 'L', 'XL'];
 
-  // Colors / parts from requirements
   const modelReqs = requirements.filter((r) => r.model_id === modelId);
   const colorList: string[] = [];
   modelReqs.forEach((req) => {
@@ -45,12 +54,10 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
     }
   });
 
-  // If no requirements were defined, fallback to model code
   if (colorList.length === 0 && model) {
     colorList.push(`اللون الأساسي لموديل ${model.model_code}`);
   }
 
-  // Model QC records
   const modelQCRecords = qcRecords.filter((r) => r.model_id === modelId);
 
   // Form State
@@ -84,10 +91,9 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
       size: selectedSize,
       goodQty: Number(goodQty) || 0,
       defectQty: Number(defectQty) || 0,
-      defectNotes: defectNotes.trim()
+      defectNotes: canWriteNotes ? defectNotes.trim() : ''
     });
 
-    // Reset notes and defect qty
     setDefectQty(0);
     setDefectNotes('');
   };
@@ -114,7 +120,7 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
       <div className="no-print flex items-center justify-between">
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-2 text-sm font-extrabold text-purple-700 hover:text-purple-900 transition"
+          className="inline-flex items-center gap-2 text-sm font-extrabold text-purple-700 hover:text-purple-900 transition cursor-pointer"
         >
           <ArrowRight className="w-4 h-4" />
           <span>← العودة لقائمة الفرز</span>
@@ -122,7 +128,7 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
 
         <button
           onClick={() => window.print()}
-          className="flex items-center gap-2 px-5 py-2 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition"
+          className="flex items-center gap-2 px-5 py-2 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
         >
           <Printer className="w-4 h-4" />
           <span>🖨️ طباعة ورقة الجرد للعامل</span>
@@ -164,10 +170,12 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
         </div>
       </div>
 
-      {/* PRINT-ONLY WORKER SHEET (matching Original Django template table) */}
+      {/* PRINT-ONLY WORKER SHEET */}
       <div className="hidden print:block my-8 p-6 bg-white border border-black rounded-lg">
         <div className="text-center mb-6">
-          <h2 className="text-xl font-bold mb-1">🏭 مصنع الملابس الجاهزة - قسم الفرز والجودة</h2>
+          <h2 className="text-xl font-bold mb-1">
+            🏭 {globalSettings?.site_name || 'مصنع الملابس الجاهزة'} - قسم الفرز والجودة
+          </h2>
           <h3 className="text-lg font-bold">📋 ورقة استلام الفرز وتسجيل الأعداد يدويًا</h3>
           <p className="text-sm mt-1">موديل: {model.model_code} | التاريخ: {new Date().toLocaleDateString('ar-EG')}</p>
         </div>
@@ -203,9 +211,9 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
         </div>
       </div>
 
-      {/* Interactive Form & Aggregated Ledger (hidden on print) */}
+      {/* Interactive Form & Aggregated Ledger */}
       <div className="no-print grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Col 5: QC Entry Form (border-top 4px solid #6f42c1) */}
+        {/* Col 5: QC Entry Form */}
         <div className="lg:col-span-5 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs border-t-4 border-t-purple-600 flex flex-col justify-between">
           <div>
             <h2 className="text-base font-extrabold text-purple-700 mb-4 flex items-center gap-2">
@@ -281,23 +289,38 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
                   </div>
                 </div>
 
+                {/* Optional QC Notes Textarea gated by canAddQCBeforePrintNotes (Task 4) */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 mb-1">
-                    ملاحظات الهالك (اختياري)
-                  </label>
-                  <input
-                    type="text"
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-purple-600" />
+                      <span>ملاحظات الفرز والهالك (اختياري)</span>
+                    </label>
+                    {!canWriteNotes && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                        <Lock className="w-3 h-3" />
+                        يتطلب صلاحية ملاحظات الفرز قبل الطباعة
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    rows={2}
+                    disabled={!canWriteNotes}
                     value={defectNotes}
                     onChange={(e) => setDefectNotes(e.target.value)}
-                    placeholder="مثال: بقعة زيت، خياطة مفكوكة، نسل بالقماش..."
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                    placeholder={
+                      canWriteNotes
+                        ? 'مثال: بقعة زيت، خياطة مفكوكة، نسل بالقماش (اختياري)...'
+                        : 'ليس لديك صلاحية كتابة ملاحظات الفرز'
+                    }
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-purple-500 focus:outline-hidden disabled:bg-slate-100 disabled:text-slate-400"
                   />
                 </div>
 
                 <div className="pt-2">
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-full bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs transition shadow-lg shadow-purple-600/20"
+                    className="w-full py-3 rounded-full bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs transition shadow-lg shadow-purple-600/20 cursor-pointer"
                   >
                     + إضافة للسجل
                   </button>
@@ -339,7 +362,7 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => exportQcCsv(modelId)}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition cursor-pointer"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   <span>📥 تصدير Excel</span>
@@ -395,7 +418,7 @@ export const QCDetailsView: React.FC<QCDetailsViewProps> = ({
             {canEdit && (
               <button
                 onClick={handleFinishQC}
-                className="w-full py-3.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+                className="w-full py-3.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle2 className="w-5 h-5" />
                 <span>✔️ إنهاء الفرز والاعتماد النهائي (تحويل للتجميع والطباعة)</span>

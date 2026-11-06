@@ -8,19 +8,14 @@ import {
   History,
   X,
   AlertTriangle,
-  AlertOctagon,
   Phone,
   Coins,
   BellRing,
   ShoppingCart,
-  Truck,
   MessageCircle,
   Copy,
   Check,
-  ChevronDown,
-  ChevronUp,
   SlidersHorizontal,
-  ExternalLink,
   Boxes,
   Sparkles,
   Layers,
@@ -46,7 +41,8 @@ export const WarehouseView: React.FC = () => {
     hasPermission,
     canViewFabricPrices,
     canEditFabricPrices,
-    canSendWhatsApp
+    canSendWhatsApp,
+    formatSupplierWhatsappMessage
   } = useApp();
 
   const [showPrintInventoryModal, setShowPrintInventoryModal] = useState(false);
@@ -187,7 +183,14 @@ export const WarehouseView: React.FC = () => {
   const handleCopyWhatsappText = () => {
     if (!reorderModalItem) return;
     const supplierName = reorderModalItem.supplier?.name || 'حضرة المورد';
-    const text = `السلام عليكم ورحمة الله، مطلوب طلبية إعادة توريد عاجلة لمصنعنا:\n- الخامة: ${reorderModalItem.fabric.name}\n- كود اللون: ${reorderModalItem.color.color_code} (${reorderModalItem.color.color_name || 'بدون اسم'})\n- الكمية المطلوبة: ${reorderQty} ${reorderModalItem.fabric.unit}\n- الرصيد الحالي بالمخزن: ${reorderModalItem.available} ${reorderModalItem.fabric.unit}\nبرجاء التأكيد وتحديد موعد الشحن. شكراً.`;
+    const text = formatSupplierWhatsappMessage({
+      supplier_name: supplierName,
+      item_name: reorderModalItem.fabric.name,
+      color_code: `${reorderModalItem.color.color_code} (${reorderModalItem.color.color_name || 'بدون اسم'})`,
+      quantity: reorderQty,
+      unit: reorderModalItem.fabric.unit,
+      available: reorderModalItem.available
+    });
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
@@ -349,7 +352,7 @@ export const WarehouseView: React.FC = () => {
       {/* Production Warehouse Tab */}
       {activeWarehouseTab === 'production' && <ProductionWarehouseView />}
 
-      {/* Fabric Warehouse Tab (يبقي كما هو) */}
+      {/* Fabric Warehouse Tab */}
       {activeWarehouseTab === 'fabric' && (
         <div className="space-y-6">
           {/* Top Bar with Fabric Filter Pills & Action Buttons */}
@@ -513,7 +516,7 @@ export const WarehouseView: React.FC = () => {
                         : 'bg-white border border-slate-200/80 shadow-xs hover:shadow-md'
                     }`}
                   >
-                    {/* Visual Warning Banner on Card Top (الشريط التحذيري العلوي) */}
+                    {/* Visual Warning Banner on Card Top */}
                     {isLow && (
                       <div className="bg-amber-400 text-slate-950 font-extrabold px-3 py-1.5 text-xs flex items-center justify-between shadow-2xs">
                         <span className="flex items-center gap-1.5">
@@ -676,7 +679,7 @@ export const WarehouseView: React.FC = () => {
           </div>
         </div>
 
-        {/* Yellow Alert Sidebar (شريط جانبي أصفر للتنبيهات التلقائية وإعادة الطلب) */}
+        {/* Yellow Alert Sidebar */}
         {sidebarOpen && (
           <aside className="w-full lg:w-84 xl:w-96 shrink-0 lg:sticky lg:top-20">
             <div className="bg-gradient-to-b from-amber-50 via-amber-50/90 to-amber-100/70 border-2 border-amber-300 border-s-8 border-s-amber-500 rounded-3xl p-5 shadow-xs space-y-4">
@@ -769,7 +772,6 @@ export const WarehouseView: React.FC = () => {
                           <span className="text-[10px] text-slate-400">مورد غير محدد</span>
                         )}
 
-                        {/* زر إعادة طلب بجانب كل صنف */}
                         <button
                           type="button"
                           onClick={() =>
@@ -1126,7 +1128,7 @@ export const WarehouseView: React.FC = () => {
         </div>
       )}
 
-      {/* Modal 4: Reorder Fabric Modal (نافذة إعادة طلب توريد قماش) */}
+      {/* Modal 4: Reorder Fabric Modal */}
       {reorderModalItem && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-amber-300 animate-in fade-in zoom-in-95 duration-150 space-y-4">
@@ -1310,7 +1312,7 @@ export const WarehouseView: React.FC = () => {
             </div>
           )}
 
-          {/* PRINT INVENTORY REPORT MODAL (طباعة تقرير جرد مخزن القماش) */}
+          {/* PRINT INVENTORY REPORT MODAL */}
           {showPrintInventoryModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
               <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">

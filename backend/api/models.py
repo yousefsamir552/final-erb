@@ -21,9 +21,84 @@ class SystemSetting(models.Model):
         return self.key
 
 
+class GlobalSettings(models.Model):
+    """
+    Stores dynamic global site settings (Header site name, Logo, Footer copyright,
+    ready-made WhatsApp/Internal message templates, and default sewing print instructions).
+    """
+    site_name = models.CharField(
+        max_length=200,
+        default="نظام إدارة المصنع",
+        verbose_name="اسم الموقع (في الهيدر)"
+    )
+    logo = models.TextField(
+        blank=True,
+        default="🏭",
+        verbose_name="شعار الموقع (رابط صورة أو Base64 أو رمز)"
+    )
+    footer_title = models.CharField(
+        max_length=255,
+        default="🏭 نظام إدارة المصنع المتكامل - مصانع الملابس الجاهزة (ERP v2.0)",
+        verbose_name="عنوان الفوتر"
+    )
+    copyright_text = models.CharField(
+        max_length=255,
+        default="تم التطوير لدعم دورة الإنتاج الشاملة والصلاحيات المتقدمة © 2026",
+        verbose_name="جملة حقوق الملكية (في الفوتر)"
+    )
+    whatsapp_supplier_template = models.TextField(
+        default=(
+            "السلام عليكم ورحمة الله، مطلوب طلبية توريد عاجلة لمصنعنا:\n"
+            "- الصنف / الخامة: {item_name}\n"
+            "- الكود / اللون: {code}\n"
+            "- الكمية المطلوبة: {quantity} {unit}\n"
+            "- الرصيد الحالي بالمخزن: {available} {unit}\n"
+            "برجاء التأكيد وتحديد موعد الشحن. شكراً لكم."
+        ),
+        verbose_name="نص رسالة الواتساب الجاهزة للموردين"
+    )
+    default_sewing_instructions = models.TextField(
+        default=(
+            "تم التأكد من أعداد الإكسسوارات ومطابقتها للمواصفات الفنية وعينة الاعتماد قبل التسليم للورشة.\n"
+            "يرجى الالتزام التام بمقاسات القص والتشطيب النظيف وموعد الاستلام المتوقع."
+        ),
+        verbose_name="التعليمات والملاحظات الافتراضية في طباعة المكن"
+    )
+    internal_message_templates = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="نصوص الرسائل الداخلية الجاهزة"
+    )
+    updated_by = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        verbose_name="آخر تعديل بواسطة"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def get_solo(cls):
+        obj = cls.objects.first()
+        if not obj:
+            obj = cls.objects.create(
+                internal_message_templates=[
+                    "يرجى سرعة مراجعة واعتماد الموديل المحول لقسمكم.",
+                    "تم الانتهاء من المرحلة الحالية وجارٍ تسليم القطع للقسم التالي.",
+                    "تنبيه: يوجد نقص في بعض المستلزمات، يرجى المراجعة العاجلة."
+                ]
+            )
+        return obj
+
+    def __str__(self):
+        return self.site_name
+
+
 class Role(models.Model):
     """
-    Dynamic Role model - completely customizable by Sudo without hardcoded limitations.
+    Dynamic Role model - completely customizable without hardcoded limitations.
+    Any permission (including managing permissions, global settings, and section notes)
+    can be granted to any role or user.
     """
     client_id = models.CharField(max_length=100, blank=True, null=True, db_index=True, verbose_name="المعرف")
     name = models.CharField(max_length=100, unique=True, verbose_name="اسم الدور")
@@ -87,6 +162,23 @@ class Role(models.Model):
             'edit_printing_costs': bool(self.can_edit_printing_costs),
             'send_whatsapp_requests': bool(self.can_send_whatsapp),
             'send_internal_messages': bool(self.can_send_messages),
+            # Dynamic administrative permissions (Task 2)
+            'manage_permissions': False,
+            'manage_users': False,
+            'manage_suppliers': False,
+            'manage_sizes': False,
+            'view_audit_logs': False,
+            # Global site settings permissions (Task 3)
+            'view_global_settings': False,
+            'edit_header_settings': False,
+            'edit_message_templates': False,
+            # Department notes permissions (Task 4)
+            'can_add_design_notes': False,
+            'can_add_cutting_notes': False,
+            'can_add_qc_before_print_notes': False,
+            'can_add_qc_after_print_notes': False,
+            'can_add_sewing_notes': False,
+            'can_add_printing_notes': False,
         }
         if isinstance(self.permissions_json, dict) and self.permissions_json:
             base.update(self.permissions_json)
@@ -95,25 +187,27 @@ class Role(models.Model):
     def sync_booleans_from_permissions(self, perms: dict):
         if not isinstance(perms, dict):
             return
-        self.permissions_json = perms
-        self.can_fabric_warehouse = bool(perms.get('fabric_warehouse_view') or perms.get('fabric_warehouse_edit'))
-        self.can_accessories_warehouse = bool(perms.get('accessories_warehouse_view') or perms.get('accessories_warehouse_edit'))
-        self.can_production_warehouse = bool(perms.get('production_warehouse_view') or perms.get('production_warehouse_edit'))
-        self.can_design = bool(perms.get('design_view') or perms.get('design_edit'))
-        self.can_cutting = bool(perms.get('cutting_view') or perms.get('cutting_edit'))
-        self.can_qc = bool(perms.get('qc_view') or perms.get('qc_edit'))
-        self.can_printing = bool(perms.get('printing_view') or perms.get('printing_edit'))
-        self.can_sewing = bool(perms.get('sewing_view') or perms.get('sewing_edit'))
-        self.can_models_tracking = bool(perms.get('models_tracking_view') or perms.get('models_tracking_edit'))
-        self.can_reports = bool(perms.get('reports_view') or perms.get('reports_edit'))
-        self.can_view_fabric_prices = bool(perms.get('view_fabric_prices'))
-        self.can_edit_fabric_prices = bool(perms.get('edit_fabric_prices'))
-        self.can_view_accessory_prices = bool(perms.get('view_accessory_prices'))
-        self.can_edit_accessory_prices = bool(perms.get('edit_accessory_prices'))
-        self.can_view_printing_costs = bool(perms.get('view_printing_costs'))
-        self.can_edit_printing_costs = bool(perms.get('edit_printing_costs'))
-        self.can_send_whatsapp = bool(perms.get('send_whatsapp_requests'))
-        self.can_send_messages = bool(perms.get('send_internal_messages'))
+        merged = self.get_permissions_dict()
+        merged.update(perms)
+        self.permissions_json = merged
+        self.can_fabric_warehouse = bool(merged.get('fabric_warehouse_view') or merged.get('fabric_warehouse_edit'))
+        self.can_accessories_warehouse = bool(merged.get('accessories_warehouse_view') or merged.get('accessories_warehouse_edit'))
+        self.can_production_warehouse = bool(merged.get('production_warehouse_view') or merged.get('production_warehouse_edit'))
+        self.can_design = bool(merged.get('design_view') or merged.get('design_edit'))
+        self.can_cutting = bool(merged.get('cutting_view') or merged.get('cutting_edit'))
+        self.can_qc = bool(merged.get('qc_view') or merged.get('qc_edit'))
+        self.can_printing = bool(merged.get('printing_view') or merged.get('printing_edit'))
+        self.can_sewing = bool(merged.get('sewing_view') or merged.get('sewing_edit'))
+        self.can_models_tracking = bool(merged.get('models_tracking_view') or merged.get('models_tracking_edit'))
+        self.can_reports = bool(merged.get('reports_view') or merged.get('reports_edit'))
+        self.can_view_fabric_prices = bool(merged.get('view_fabric_prices'))
+        self.can_edit_fabric_prices = bool(merged.get('edit_fabric_prices'))
+        self.can_view_accessory_prices = bool(merged.get('view_accessory_prices'))
+        self.can_edit_accessory_prices = bool(merged.get('edit_accessory_prices'))
+        self.can_view_printing_costs = bool(merged.get('view_printing_costs'))
+        self.can_edit_printing_costs = bool(merged.get('edit_printing_costs'))
+        self.can_send_whatsapp = bool(merged.get('send_whatsapp_requests'))
+        self.can_send_messages = bool(merged.get('send_internal_messages'))
 
     def save(self, *args, **kwargs):
         if not self.client_id:
@@ -134,7 +228,7 @@ class UserProfile(models.Model):
     phone = models.CharField(max_length=50, blank=True, null=True, verbose_name="رقم الهاتف")
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name="users")
     role_title = models.CharField(max_length=150, blank=True, null=True, verbose_name="مسمى الدور الوظيفي")
-    is_sudo = models.BooleanField(default=False, verbose_name="حساب الإدارة العليا Sudo")
+    is_sudo = models.BooleanField(default=False, verbose_name="حساب الطوارئ المطلق Sudo")
     is_active = models.BooleanField(default=True, verbose_name="نشط")
     custom_permissions = models.JSONField(default=dict, blank=True, verbose_name="تخصيص صلاحيات إضافية")
     last_active = models.DateTimeField(blank=True, null=True, verbose_name="آخر ظهور")
@@ -159,7 +253,7 @@ class UserProfile(models.Model):
         return False
 
     def has_perm(self, perm_name: str) -> bool:
-        if self.is_sudo or self.username == 'sudo':
+        if self.is_sudo or self.username.lower() == 'sudo':
             return True
         if isinstance(self.custom_permissions, dict) and perm_name in self.custom_permissions:
             val = self.custom_permissions[perm_name]
@@ -199,8 +293,12 @@ class UserProfile(models.Model):
         return False
 
     def save(self, *args, **kwargs):
-        if not self.client_id:
-            self.client_id = 'user-sudo' if self.username == 'sudo' else generate_client_id('user')
+        if self.username.lower() == 'sudo':
+            self.client_id = 'user-sudo'
+            self.is_sudo = True
+            self.is_active = True
+        elif not self.client_id:
+            self.client_id = generate_client_id('user')
         if self.role and not self.role_title:
             self.role_title = self.role.name
         super().save(*args, **kwargs)
@@ -451,7 +549,8 @@ class ModelItem(models.Model):
     sewing_pants_status = models.CharField(max_length=50, default="ready", verbose_name="حالة خياطة البنطلون")
     sewing_pants_pieces = models.IntegerField(default=0, verbose_name="عدد قطع البنطلون")
 
-    # Separated Notes for Shirt & Pants
+    # Design & Operating Notes
+    design_notes = models.TextField(blank=True, null=True, default='', verbose_name="ملاحظات قسم التصميم")
     notes_shirt = models.TextField(blank=True, null=True, default='', verbose_name="ملاحظات تشغيل التيشرت")
     notes_pants = models.TextField(blank=True, null=True, default='', verbose_name="ملاحظات تشغيل البنطلون")
 
@@ -519,6 +618,7 @@ class ModelTimeline(models.Model):
     timestamp_str = models.CharField(max_length=100, blank=True, null=True, verbose_name="التوقيت النصي")
     notes = models.TextField(blank=True, null=True, verbose_name="تفاصيل وملاحظات")
     user = models.CharField(max_length=150, blank=True, null=True, verbose_name="المستخدم المسؤول")
+    details = models.JSONField(default=dict, blank=True, verbose_name="بيانات المرحلة التفصيلية وقت الحدث")
 
     class Meta:
         ordering = ['-timestamp', '-id']
@@ -538,7 +638,7 @@ class CuttingRecord(models.Model):
     layer_weight = models.FloatField(default=0.0, verbose_name="وزن الراق")
     shade_degree = models.CharField(max_length=100, blank=True, null=True, default='', verbose_name="درجة الصبغة")
     cutter_name = models.CharField(max_length=150, verbose_name="اسم المقصدار")
-    notes = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True, default='', verbose_name="ملاحظات القص")
     created_at_str = models.CharField(max_length=100, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -5,48 +5,37 @@ import {
   Plus,
   FileSpreadsheet,
   ArrowUpDown,
-  History,
   X,
   AlertTriangle,
-  Phone,
   Coins,
   ShoppingCart,
-  Truck,
   MessageCircle,
-  Copy,
-  Check,
   ChevronDown,
   ChevronUp,
-  SlidersHorizontal,
   Search,
-  Filter,
   Image as ImageIcon,
   FolderPlus,
   Trash2,
   Printer,
-  CheckCircle2,
-  Tag,
   PackageCheck
 } from 'lucide-react';
-import { AccessoryItem, AccessoryType, AccessoryUnit, AccessoryUsageType, Supplier } from '../types';
+import { AccessoryItem, AccessoryUnit, AccessoryUsageType, Supplier } from '../types';
 
 export const AccessoriesWarehouseView: React.FC = () => {
   const {
     accessoryTypes,
     accessoryItems,
-    accessoryTransactions,
     suppliers,
     hasPermission,
     canViewAccessoryPrices,
-    canEditAccessoryPrices,
     canSendWhatsApp,
     addAccessoryType,
     addAccessoryItem,
-    updateAccessoryItem,
     deleteAccessoryItem,
     recordAccessoryTransaction,
     exportAccessoryInventoryCsv,
-    markAccessoryWithdrawn
+    markAccessoryWithdrawn,
+    formatSupplierWhatsappMessage
   } = useApp();
 
   const canEdit = hasPermission('warehouse', true) || hasPermission('accessories_warehouse', true);
@@ -54,19 +43,18 @@ export const AccessoriesWarehouseView: React.FC = () => {
   // Filter & Search states
   const [selectedTypeId, setSelectedTypeId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showLowStockOnly, setShowLowStockOnly] = useState<boolean>(false);
+  const [showLowStockOnly] = useState<boolean>(false);
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showAddTypeModal, setShowAddTypeModal] = useState<boolean>(false);
   const [showTransactionModal, setShowTransactionModal] = useState<boolean>(false);
-  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [showPrintInventoryModal, setShowPrintInventoryModal] = useState<boolean>(false);
   const [showPrintAlertsModal, setShowPrintAlertsModal] = useState<boolean>(false);
 
   // Alert sidebar state & threshold
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
-  const [globalThreshold, setGlobalThreshold] = useState<number>(30);
+  const [globalThreshold] = useState<number>(30);
   const [alertSectionTab, setAlertSectionTab] = useState<'all' | 'stock' | 'custom_model'>('all');
   const [modalAlertTab, setModalAlertTab] = useState<'all' | 'stock' | 'custom_model'>('all');
 
@@ -111,24 +99,13 @@ export const AccessoriesWarehouseView: React.FC = () => {
   const [newTypeNameInput, setNewTypeNameInput] = useState<string>('');
   const [newTypeDescInput, setNewTypeDescInput] = useState<string>('');
 
-  // Sample presets for quick image selection
-  const SAMPLE_PRESET_IMAGES = [
-    { title: 'بادج نسر مطرز', url: 'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?w=500&auto=format&fit=crop&q=60' },
-    { title: 'بادج سيليكون', url: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=500&auto=format&fit=crop&q=60' },
-    { title: 'لعبة أطفال دبدوب', url: 'https://images.unsplash.com/photo-1559454403-b8fb88521f11?w=500&auto=format&fit=crop&q=60' },
-    { title: 'وردة شيفون', url: 'https://images.unsplash.com/photo-1563245372-f21724e3856d?w=500&auto=format&fit=crop&q=60' },
-    { title: 'شريط دانتيل قطن', url: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&auto=format&fit=crop&q=60' },
-    { title: 'تيكت رقبة منسوج', url: 'https://images.unsplash.com/photo-1544441893-675973e31985?w=500&auto=format&fit=crop&q=60' }
-  ];
-
-  // Calculate low stock / deficit items with ADVANCED USAGE TYPE LOGIC (Requirement 2)
+  // Calculate low stock / deficit items with ADVANCED USAGE TYPE LOGIC
   const lowStockItems = accessoryItems
     .map((item) => {
       const sup = suppliers.find((s) => s.id === item.supplier_id);
       const available = Number((item.quantity - item.reserved_quantity).toFixed(2));
 
       if (item.usage_type === 'custom_model') {
-        // If already completely withdrawn for the model, it disappears permanently from alerts!
         if (item.withdrawn_for_model) {
           return { item, supplier: sup, available, threshold: 0, deficit: 0, isLow: false };
         }
@@ -145,7 +122,6 @@ export const AccessoriesWarehouseView: React.FC = () => {
           isLow
         };
       } else {
-        // Continuous Stock Usage
         const threshold = item.min_threshold ?? globalThreshold;
         const deficit = Math.max(0, threshold - available);
         const isLow = available <= threshold;
@@ -228,7 +204,14 @@ export const AccessoriesWarehouseView: React.FC = () => {
 
   const generateWhatsappText = (item: AccessoryItem, qty: number, supplierName?: string) => {
     const isCustom = item.usage_type === 'custom_model';
-    return `السلام عليكم ورحمة الله، مطلوب طلبية توريد إكسسوارات عاجلة لمصنعنا:\n- النوع: ${item.type_name}\n- كود الصنف: ${item.code}\n- اسم الإكسسوار: ${item.name}\n${isCustom ? `- خاص بتشغيلة موديل: ${item.custom_model_code || 'محدد'}\n` : ''}- الكمية المطلوبة للتوريد: ${qty} ${item.unit}\n- الرصيد الحالي بالمخزن: ${item.quantity} ${item.unit}\nبرجاء التأكيد وتحديد موعد الشحن. شكراً لكم.`;
+    return formatSupplierWhatsappMessage({
+      supplier_name: supplierName || 'حضرة المورد',
+      item_name: `${item.type_name} - ${item.name}${isCustom && item.custom_model_code ? ` (موديل ${item.custom_model_code})` : ''}`,
+      color_code: item.code,
+      quantity: qty,
+      unit: item.unit,
+      available: item.quantity
+    });
   };
 
   const handleCopyWhatsappText = () => {
@@ -793,7 +776,59 @@ export const AccessoriesWarehouseView: React.FC = () => {
         })}
       </div>
 
-      {/* MODAL 1: ADD ACCESSORY ITEM (With usage type support) */}
+      {/* MODAL 0: ADD ACCESSORY TYPE */}
+      {showAddTypeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-extrabold text-base text-slate-900">إضافة تصنيف إكسسوارات جديد</h3>
+              <button onClick={() => setShowAddTypeModal(false)} className="text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateType} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">اسم التصنيف *</label>
+                <input
+                  type="text"
+                  required
+                  value={newTypeNameInput}
+                  onChange={(e) => setNewTypeNameInput(e.target.value)}
+                  placeholder="مثال: زراير، كباسين، كمر..."
+                  className="w-full px-3 py-2 border rounded-xl text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الوصف (اختياري)</label>
+                <input
+                  type="text"
+                  value={newTypeDescInput}
+                  onChange={(e) => setNewTypeDescInput(e.target.value)}
+                  placeholder="وصف مختصر..."
+                  className="w-full px-3 py-2 border rounded-xl text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddTypeModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-full"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-pink-600 hover:bg-pink-700 rounded-full"
+                >
+                  حفظ التصنيف
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: ADD ACCESSORY ITEM */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white rounded-3xl max-w-xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -810,7 +845,7 @@ export const AccessoriesWarehouseView: React.FC = () => {
             </div>
 
             <form onSubmit={handleCreateAccessory} className="p-6 overflow-y-auto space-y-4">
-              {/* Usage Type Selection (Requirement 2) */}
+              {/* Usage Type Selection */}
               <div className="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-200 space-y-2">
                 <label className="block text-xs font-black text-blue-950">نوع استخدام الإكسسوار:</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1001,7 +1036,7 @@ export const AccessoriesWarehouseView: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 2: PRINT INVENTORY REPORT (تقرير جرد مخزن الإكسسوارات) */}
+      {/* MODAL 2: PRINT INVENTORY REPORT */}
       {showPrintInventoryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -1107,7 +1142,7 @@ export const AccessoriesWarehouseView: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 3: PRINT DEFICIT SHEET FOR PROCUREMENT (ورقة التنبيهات والنواقص لعامل المشتريات) */}
+      {/* MODAL 3: PRINT DEFICIT SHEET FOR PROCUREMENT */}
       {showPrintAlertsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -1140,7 +1175,7 @@ export const AccessoriesWarehouseView: React.FC = () => {
               </div>
             </div>
 
-            {/* Modal Tabs Bar (no-print) */}
+            {/* Modal Tabs Bar */}
             <div className="px-6 py-2.5 bg-slate-100 border-b border-slate-200 flex items-center gap-2 no-print overflow-x-auto">
               <span className="text-xs font-bold text-slate-500 ms-1">عرض وتصفية التقرير:</span>
               <button
@@ -1283,7 +1318,7 @@ export const AccessoriesWarehouseView: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-semibold">
-                        {modelDeficits.map(({ item, supplier, available, threshold, deficit }, idx) => (
+                        {modelDeficits.map(({ item, supplier, threshold, deficit }, idx) => (
                           <tr key={item.id} className="hover:bg-pink-50/40">
                             <td className="p-2.5 text-slate-400">{idx + 1}</td>
                             <td className="p-2.5">

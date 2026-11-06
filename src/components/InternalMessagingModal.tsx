@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../context/AppContext';
 import { 
   MessageSquare, 
@@ -6,10 +7,7 @@ import {
   X, 
   User, 
   ShieldAlert, 
-  Check, 
-  CheckCheck,
   Search,
-  Clock,
   Sparkles
 } from 'lucide-react';
 
@@ -26,7 +24,8 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
     unreadMessagesCount, 
     sendInternalMessage, 
     markMessageRead, 
-    canSendMessages 
+    canSendMessages,
+    globalSettings
   } = useApp();
 
   const [selectedUserId, setSelectedUserId] = useState<string>('');
@@ -34,8 +33,10 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Filter out the current logged-in user from contact list
-  const availableContacts = users.filter((u) => u.id !== currentUser?.id);
+  // Filter out the current logged-in user AND strictly hide sudo from contact list (Task 2)
+  const availableContacts = users.filter(
+    (u) => u.id !== currentUser?.id && u.username.toLowerCase() !== 'sudo' && !u.is_sudo
+  );
 
   const filteredContacts = availableContacts.filter((u) => {
     const q = userSearchTerm.toLowerCase();
@@ -52,6 +53,18 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
       setSelectedUserId(availableContacts[0].id);
     }
   }, [isOpen, selectedUserId, availableContacts]);
+
+  // Allow Escape key to close the modal smoothly
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   // Scroll to bottom when conversation changes
   useEffect(() => {
@@ -74,13 +87,15 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
 
   if (!isOpen) return null;
 
-  const selectedUser = users.find((u) => u.id === selectedUserId);
+  const selectedUser = availableContacts.find((u) => u.id === selectedUserId);
 
   // Messages between currentUser and selectedUser
   const activeConversation = internalMessages.filter((m) => {
     if (!currentUser || !selectedUser) return false;
     const isSentByMe = m.sender_id === currentUser.id && m.receiver_id === selectedUser.id;
-    const isSentToMe = m.sender_id === selectedUser.id && (m.receiver_id === currentUser.id || m.receiver_id === currentUser.username);
+    const isSentToMe =
+      m.sender_id === selectedUser.id &&
+      (m.receiver_id === currentUser.id || m.receiver_id === currentUser.username);
     return isSentByMe || isSentToMe;
   });
 
@@ -95,15 +110,24 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
   };
 
   const hasPermissionToSend = canSendMessages();
+  const readyTemplates = globalSettings?.internal_message_templates || [];
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white rounded-3xl max-w-4xl w-full h-[85vh] shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
-        
-        {/* Header */}
-        <div className="p-4 sm:px-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
+  const modalContent = (
+    <div
+      className="fixed inset-0 z-[100] bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="المراسلات والمحادثات الداخلية"
+    >
+      <div
+        className="bg-white rounded-3xl max-w-4xl w-full h-[82vh] max-h-[720px] min-h-[460px] my-auto shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header with prominent Close (X) button */}
+        <div className="p-4 sm:px-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/90 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
               <MessageSquare className="w-5 h-5" />
             </div>
             <div>
@@ -122,20 +146,23 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
           </div>
 
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-200/60 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition"
+            aria-label="إغلاق نافذة الرسائل"
+            title="إغلاق (Esc)"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 hover:border-rose-600 font-bold text-xs cursor-pointer transition-all duration-150 shadow-2xs shrink-0"
           >
             <X className="w-4 h-4" />
+            <span>إغلاق</span>
           </button>
         </div>
 
         {/* Content Body: Two columns (Contacts Sidebar + Chat Area) */}
-        <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
-          
+        <div className="flex-grow flex flex-col md:flex-row overflow-hidden min-h-0">
           {/* Contacts Sidebar */}
-          <div className="w-full md:w-80 border-b md:border-b-0 md:border-e border-slate-200 flex flex-col bg-slate-50/50 shrink-0">
+          <div className="w-full md:w-80 border-b md:border-b-0 md:border-e border-slate-200 flex flex-col bg-slate-50/50 shrink-0 max-h-48 md:max-h-none">
             {/* Search Box */}
-            <div className="p-3 border-b border-slate-200 bg-white">
+            <div className="p-3 border-b border-slate-200 bg-white shrink-0">
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute start-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -160,7 +187,6 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
                       !m.is_read
                   ).length;
 
-                  // Find last message with this user
                   const lastMsg = internalMessages
                     .filter(
                       (m) =>
@@ -172,6 +198,7 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
                   return (
                     <button
                       key={contact.id}
+                      type="button"
                       onClick={() => setSelectedUserId(contact.id)}
                       className={`w-full text-start p-2.5 rounded-2xl transition flex items-center justify-between cursor-pointer border ${
                         isSelected
@@ -220,11 +247,11 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
           </div>
 
           {/* Chat Area */}
-          <div className="flex-grow flex flex-col bg-white overflow-hidden">
+          <div className="flex-grow flex flex-col bg-white overflow-hidden min-h-0">
             {selectedUser ? (
               <>
                 {/* Chat Top Banner */}
-                <div className="p-3.5 px-5 border-b border-slate-200 flex items-center justify-between bg-white">
+                <div className="p-3.5 px-5 border-b border-slate-200 flex items-center justify-between bg-white shrink-0">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-black text-xs">
                       {selectedUser.real_name.charAt(0)}
@@ -246,7 +273,7 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
                 </div>
 
                 {/* Conversation History */}
-                <div className="flex-grow overflow-y-auto p-4 space-y-3 bg-slate-50/40">
+                <div className="flex-grow overflow-y-auto p-4 space-y-3 bg-slate-50/40 min-h-0">
                   {activeConversation.length > 0 ? (
                     activeConversation.map((msg) => {
                       const isMe = msg.sender_id === currentUser?.id;
@@ -285,8 +312,28 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
                   <div ref={messagesEndRef} />
                 </div>
 
+                {/* Ready-made message templates bar (Task 3 integration) */}
+                {hasPermissionToSend && readyTemplates.length > 0 && (
+                  <div className="px-3 py-2 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto shrink-0">
+                    <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 shrink-0">
+                      <Sparkles className="w-3 h-3 text-indigo-500" />
+                      <span>رسائل جاهزة:</span>
+                    </span>
+                    {readyTemplates.map((tpl, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setMessageText(tpl)}
+                        className="px-2.5 py-1 rounded-full bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 text-[10px] font-semibold whitespace-nowrap transition cursor-pointer shrink-0"
+                      >
+                        {tpl.length > 42 ? tpl.slice(0, 42) + '...' : tpl}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* Bottom Input or Permission Denied Message */}
-                <div className="p-3 border-t border-slate-200 bg-white">
+                <div className="p-3 border-t border-slate-200 bg-white shrink-0">
                   {hasPermissionToSend ? (
                     <form onSubmit={handleSend} className="flex items-center gap-2">
                       <input
@@ -313,7 +360,7 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
                           خاصية إرسال الرسائل مقيدة بالصلاحيات
                         </strong>
                         <span className="text-[11px] text-amber-700">
-                          حسابك الحالي لا يمتلك صلاحية (إرسال الرسائل والمراسلات الداخلية - can_send_messages). يمكنك الاطلاع على الرسائل فقط، ويرجى مراجعة إدارة Sudo لتفعيل صلاحية الإرسال.
+                          حسابك الحالي لا يمتلك صلاحية (إرسال الرسائل والمراسلات الداخلية). يمكنك الاطلاع على الرسائل فقط، ويرجى مراجعة مسؤول الصلاحيات لتفعيل الإرسال.
                         </span>
                       </div>
                     </div>
@@ -327,8 +374,12 @@ export const InternalMessagingModal: React.FC<InternalMessagingModalProps> = ({ 
             )}
           </div>
         </div>
-
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 };

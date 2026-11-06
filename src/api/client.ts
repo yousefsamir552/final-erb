@@ -67,6 +67,14 @@ export const api = {
   // جلب الحالة الكاملة للنظام من قاعدة البيانات المركزية
   getState: () => request<any>('/state/'),
 
+  // الإعدادات العامة للموقع (Global Settings)
+  getGlobalSettings: () => request<any>('/global-settings/'),
+  updateGlobalSettings: (data: any) =>
+    request<any>('/global-settings/update_settings/', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+
   // الأدوار والصلاحيات (Roles)
   getRoles: () => request<any[]>('/roles/'),
   createRole: (data: any) =>
@@ -167,10 +175,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ user_name: userName })
     }),
-  finishCuttingToQC: (modelId: string, userName?: string) =>
+  finishCuttingToQC: (modelId: string, userName?: string, notes?: string) =>
     request<any>(`/models/${encodeURIComponent(modelId)}/finish_cutting/`, {
       method: 'POST',
-      body: JSON.stringify({ user_name: userName })
+      body: JSON.stringify({ user_name: userName, notes })
     }),
   recordQCStageCount: (modelId: string, data: any) =>
     request<{ model: any; qcRecord: any }>(`/models/${encodeURIComponent(modelId)}/record_qc_count/`, {
@@ -219,10 +227,10 @@ export const api = {
       body: JSON.stringify({ status, user_name: userName })
     }),
   getSewingDispatches: () => request<any[]>('/sewing-dispatches/'),
-  receiveFromSewing: (id: string, userName?: string) =>
+  receiveFromSewing: (id: string, userName?: string, notes?: string) =>
     request<any>(`/sewing-dispatches/${encodeURIComponent(id)}/receive/`, {
       method: 'POST',
-      body: JSON.stringify({ user_name: userName })
+      body: JSON.stringify({ user_name: userName, notes })
     }),
 
   // التنبيهات، الرسائل الداخلية، وسجل المراقبة

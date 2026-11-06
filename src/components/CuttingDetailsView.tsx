@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Scissors, ArrowRight, CheckCircle2, User, Layers, Scale, FileSpreadsheet } from 'lucide-react';
+import {
+  Scissors,
+  ArrowRight,
+  CheckCircle2,
+  User,
+  FileSpreadsheet,
+  FileText,
+  Lock
+} from 'lucide-react';
 
 interface CuttingDetailsViewProps {
   modelId: string;
@@ -21,10 +29,12 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
     addCuttingRecord,
     finishCuttingToQC,
     exportCuttingCsv,
-    hasPermission
+    hasPermission,
+    canAddCuttingNotes
   } = useApp();
 
   const canEdit = hasPermission('cutting', true);
+  const canWriteNotes = canAddCuttingNotes();
   const model = models.find((m) => m.id === modelId);
   const modelReqs = requirements.filter((r) => r.model_id === modelId);
   const modelCuttingRecords = cuttingRecords.filter((r) => r.model_id === modelId);
@@ -36,6 +46,7 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
   const [layerWeight, setLayerWeight] = useState<number>(1.5);
   const [piecesCount, setPiecesCount] = useState<number>(120);
   const [shadeDegree, setShadeDegree] = useState('');
+  const [cuttingNotes, setCuttingNotes] = useState('');
 
   if (!model) {
     return (
@@ -62,11 +73,12 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
       layersCount: Number(layersCount) || 0,
       layerWeight: Number(layerWeight) || 0,
       piecesCount: Number(piecesCount) || 0,
-      shadeDegree: shadeDegree.trim()
+      shadeDegree: shadeDegree.trim(),
+      notes: canWriteNotes ? cuttingNotes.trim() : ''
     });
 
-    // Reset some fields
     setShadeDegree('');
+    setCuttingNotes('');
   };
 
   const handleFinishCutting = () => {
@@ -75,7 +87,7 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
       return;
     }
     if (window.confirm('هل أنت متأكد من إنهاء القص وتحويل الموديل للفرز والكنترول؟')) {
-      finishCuttingToQC(modelId);
+      finishCuttingToQC(modelId, canWriteNotes ? cuttingNotes.trim() : '');
       onFinishedToQC();
     }
   };
@@ -96,7 +108,7 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
         </button>
       </div>
 
-      {/* TOP INFORMATIONAL CARD (REQUIREMENT 4: Model Image, Design Details, Target Cut Quantity) */}
+      {/* TOP INFORMATIONAL CARD */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="flex items-center gap-5">
           <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 shadow-xs">
@@ -137,6 +149,11 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
                   ماركر الطباعة: {model.print_marker_url}
                 </span>
               )}
+              {model.design_notes && (
+                <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold border border-amber-200 line-clamp-1 max-w-[220px]" title={model.design_notes}>
+                  ملاحظات التصميم: {model.design_notes}
+                </span>
+              )}
               {model.notes_shirt && (
                 <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 font-bold border border-blue-200 line-clamp-1 max-w-[220px]" title={model.notes_shirt}>
                   ملاحظات تيشرت: {model.notes_shirt}
@@ -172,7 +189,7 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Col 5: Cutting Input Form (border-top border-danger border-4) */}
+        {/* Col 5: Cutting Input Form */}
         <div className="lg:col-span-5 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs border-t-4 border-t-rose-600 flex flex-col justify-between">
           <div>
             <h2 className="text-base font-extrabold text-rose-600 mb-4 flex items-center gap-2">
@@ -202,6 +219,11 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
                         </option>
                       );
                     })}
+                    {modelReqs.length === 0 && (
+                      <option value={`اللون الأساسي (${model.model_code})`}>
+                        اللون الأساسي ({model.model_code})
+                      </option>
+                    )}
                   </select>
                 </div>
 
@@ -283,10 +305,38 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
                   />
                 </div>
 
+                {/* Optional Cutting Notes Textarea gated by canAddCuttingNotes() (Task 4) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-rose-600" />
+                      <span>ملاحظات القص (اختياري)</span>
+                    </label>
+                    {!canWriteNotes && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                        <Lock className="w-3 h-3" />
+                        يتطلب صلاحية ملاحظات القص
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    rows={2}
+                    disabled={!canWriteNotes}
+                    value={cuttingNotes}
+                    onChange={(e) => setCuttingNotes(e.target.value)}
+                    placeholder={
+                      canWriteNotes
+                        ? 'أدخل أي ملاحظات حول الفرش، عيوب القماش، أو تفاصيل القص (اختياري)...'
+                        : 'ليس لديك صلاحية تسجيل ملاحظات القص'
+                    }
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-rose-500 focus:outline-hidden disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </div>
+
                 <div className="pt-2">
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-lg shadow-rose-500/20"
+                    className="w-full py-3 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-lg shadow-rose-500/20 cursor-pointer"
                   >
                     + إضافة الراق للسجل
                   </button>
@@ -320,7 +370,7 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => exportCuttingCsv(modelId)}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition cursor-pointer"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   <span>📥 تصدير Excel</span>
@@ -337,6 +387,7 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
                     <th className="px-4 py-3 text-center">الرقات</th>
                     <th className="px-4 py-3 text-center">القطع المنتجة</th>
                     <th className="px-4 py-3 text-center">الوزن</th>
+                    <th className="px-4 py-3">الملاحظات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -358,11 +409,14 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
                         <td className="px-4 py-3 text-center text-slate-500">
                           {rec.layer_weight} كجم
                         </td>
+                        <td className="px-4 py-3 text-slate-600 text-[11px] max-w-[180px]">
+                          {rec.notes || rec.shade_degree || '-'}
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={5} className="text-center py-8 text-slate-400">
+                      <td colSpan={6} className="text-center py-8 text-slate-400">
                         لم يتم تسجيل أرقام قص بعد لهذا الموديل.
                       </td>
                     </tr>
@@ -376,7 +430,7 @@ export const CuttingDetailsView: React.FC<CuttingDetailsViewProps> = ({
             {canEdit && (
               <button
                 onClick={handleFinishCutting}
-                className="w-full py-3.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+                className="w-full py-3.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle2 className="w-5 h-5" />
                 <span>✔️ إنهاء القص والتحويل للفرز والكنترول</span>

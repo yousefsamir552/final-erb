@@ -46,6 +46,39 @@ export interface RolePermissions {
 
   // Internal messaging permission
   send_internal_messages: boolean;
+
+  // Dynamic administrative permissions (Task 2 - no longer Sudo-exclusive)
+  manage_permissions?: boolean;
+  manage_users?: boolean;
+  manage_suppliers?: boolean;
+  manage_sizes?: boolean;
+  view_audit_logs?: boolean;
+
+  // Global Site Settings permissions (Task 3)
+  view_global_settings?: boolean;
+  edit_header_settings?: boolean;
+  edit_message_templates?: boolean;
+
+  // Department-specific Notes permissions (Task 4)
+  can_add_design_notes?: boolean;
+  can_add_cutting_notes?: boolean;
+  can_add_qc_before_print_notes?: boolean;
+  can_add_qc_after_print_notes?: boolean;
+  can_add_sewing_notes?: boolean;
+  can_add_printing_notes?: boolean;
+}
+
+export interface GlobalSiteSettings {
+  id?: string;
+  site_name: string;
+  logo: string;
+  footer_title: string;
+  copyright_text: string;
+  whatsapp_supplier_template: string;
+  default_sewing_instructions: string;
+  internal_message_templates: string[];
+  updated_by?: string;
+  updated_at?: string;
 }
 
 export interface CustomRole {
@@ -73,7 +106,7 @@ export interface UserPermissions {
   production_warehouse?: PermissionLevel;
   reports?: PermissionLevel;
 
-  // Specific fine-grained overrides if applicable
+  // Specific fine-grained overrides if applicable (any permission can be granted directly to a user)
   view_fabric_prices?: boolean;
   edit_fabric_prices?: boolean;
   view_accessory_prices?: boolean;
@@ -82,6 +115,26 @@ export interface UserPermissions {
   edit_printing_costs?: boolean;
   send_whatsapp_requests?: boolean;
   send_internal_messages?: boolean;
+
+  // Administrative & Settings overrides
+  manage_permissions?: boolean;
+  manage_users?: boolean;
+  manage_suppliers?: boolean;
+  manage_sizes?: boolean;
+  view_audit_logs?: boolean;
+  view_global_settings?: boolean;
+  edit_header_settings?: boolean;
+  edit_message_templates?: boolean;
+
+  // Section Notes overrides
+  can_add_design_notes?: boolean;
+  can_add_cutting_notes?: boolean;
+  can_add_qc_before_print_notes?: boolean;
+  can_add_qc_after_print_notes?: boolean;
+  can_add_sewing_notes?: boolean;
+  can_add_printing_notes?: boolean;
+
+  [key: string]: any;
 }
 
 export interface User {
@@ -212,7 +265,7 @@ export interface DesignModel {
   sewing_expected_date?: string;
   sewing_pieces_count?: number;
 
-  // Split sewing independent tracking for Shirt & Pants (Requirement 2)
+  // Split sewing independent tracking for Shirt & Pants
   sewing_shirt_workshop?: string;
   sewing_shirt_expected_date?: string;
   sewing_shirt_status?: SewingDispatchStatus;
@@ -223,7 +276,8 @@ export interface DesignModel {
   sewing_pants_status?: SewingDispatchStatus;
   sewing_pants_pieces?: number;
 
-  // Split operating notes
+  // Design & Split operating notes
+  design_notes?: string;
   notes_shirt: string;
   notes_pants: string;
 
@@ -273,6 +327,7 @@ export interface CuttingRecord {
   piecesCount?: number;
   shade_degree?: string;
   shadeDegree?: string;
+  notes?: string;
   created_at: string;
 }
 

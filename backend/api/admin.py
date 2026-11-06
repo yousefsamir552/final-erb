@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    SystemSetting, Role, UserProfile, SizeDef, Supplier,
+    SystemSetting, GlobalSettings, Role, UserProfile, SizeDef, Supplier,
     Fabric, FabricColor, FabricTransaction,
     AccessoryType, Accessory, AccessoryTransaction,
     ModelItem, ModelRequirement, ModelAccessory, ModelTimeline,
@@ -12,6 +12,11 @@ from .models import (
 @admin.register(SystemSetting)
 class SystemSettingAdmin(admin.ModelAdmin):
     list_display = ('key', 'updated_at')
+
+
+@admin.register(GlobalSettings)
+class GlobalSettingsAdmin(admin.ModelAdmin):
+    list_display = ('site_name', 'copyright_text', 'updated_by', 'updated_at')
 
 
 @admin.register(Role)

@@ -7,13 +7,11 @@ import {
   Palette,
   Save,
   Plus,
-  AlertCircle,
-  FileCheck,
-  Tag,
   Shirt,
   Sparkles,
   Layers,
-  HelpCircle
+  FileText,
+  Lock
 } from 'lucide-react';
 
 interface ModelDetailsViewProps {
@@ -42,17 +40,17 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
     updateModelNotesAndTarget,
     issueFabricToCutting,
     deleteDesignModel,
-    hasPermission
+    hasPermission,
+    canAddDesignNotes
   } = useApp();
 
   const canEdit = hasPermission('design', true);
+  const canWriteNotes = canAddDesignNotes();
   const model = models.find((m) => m.id === modelId && !m.is_deleted);
 
-  // Model requirements & accessories
   const modelReqs = requirements.filter((r) => r.model_id === modelId);
   const modelAccs = accessories.filter((a) => a.model_id === modelId);
 
-  // Target Cut Quantity (Prominently placed at the TOP)
   const [targetCutQuantity, setTargetCutQuantity] = useState<number>(model?.target_cut_quantity || 500);
 
   // Local Form state for Section 1 (Add Color & Add Accessory)
@@ -64,11 +62,12 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
   const [accTargetType, setAccTargetType] = useState<'shirt' | 'pants'>('shirt');
   const [accPieceConsumption, setAccPieceConsumption] = useState<number>(1);
 
-  // Local Form state for Section 2 (Planning quantities, markers, separate notes)
+  // Local Form state for Section 2 (Planning quantities, markers, notes)
   const [reqQuantities, setReqQuantities] = useState<Record<string, number>>({});
   const [accQuantities, setAccQuantities] = useState<Record<string, number>>({});
   const [mainMarkerUrl, setMainMarkerUrl] = useState('');
   const [printMarkerUrl, setPrintMarkerUrl] = useState('');
+  const [designNotes, setDesignNotes] = useState('');
   const [notesShirt, setNotesShirt] = useState('');
   const [notesPants, setNotesPants] = useState('');
 
@@ -77,6 +76,7 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
       setTargetCutQuantity(model.target_cut_quantity || 500);
       setMainMarkerUrl(model.main_marker_url || '');
       setPrintMarkerUrl(model.print_marker_url || '');
+      setDesignNotes(model.design_notes || '');
       setNotesShirt(model.notes_shirt || '');
       setNotesPants(model.notes_pants || '');
     }
@@ -152,6 +152,7 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
       accQuantities,
       mainMarkerUrl,
       printMarkerUrl,
+      designNotes,
       notesShirt,
       notesPants,
       targetCutQuantity
@@ -179,7 +180,6 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
     }
   };
 
-  // Filter accessories into Shirt & Pants (Requirement 3)
   const shirtAccessories = modelAccs.filter((a) => a.target_type !== 'pants');
   const pantsAccessories = modelAccs.filter((a) => a.target_type === 'pants');
 
@@ -189,14 +189,14 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
       <div>
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-2 text-sm font-extrabold text-blue-600 hover:text-blue-800 transition"
+          className="inline-flex items-center gap-2 text-sm font-extrabold text-blue-600 hover:text-blue-800 transition cursor-pointer"
         >
           <ArrowRight className="w-4 h-4" />
           <span>← العودة لقسم التصميم</span>
         </button>
       </div>
 
-      {/* TOP HEADER CARD: Prominently displaying Target Cut Quantity (Requirement 3) */}
+      {/* TOP HEADER CARD */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-start gap-6">
         <div className="w-40 h-40 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200 shadow-xs">
           <img
@@ -226,7 +226,7 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
               </p>
             </div>
 
-            {/* TARGET CUTTING QUANTITY PROMINENTLY DISPLAYED AT TOP */}
+            {/* TARGET CUTTING QUANTITY */}
             <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-2xl flex items-center gap-3 shadow-xs">
               <div className="p-2 bg-blue-600 text-white rounded-xl shadow-xs">
                 <Scissors className="w-5 h-5" />
@@ -328,7 +328,7 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
             </form>
           </div>
 
-          {/* Card 2: Add Accessory to Model (Split Shirt / Pants & Piece Consumption - Requirement 3) */}
+          {/* Card 2: Add Accessory to Model */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
             <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-pink-600" />
@@ -422,7 +422,7 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Requirements, Separated Accessories, Markers & Split Notes */}
+        {/* Right Column: Requirements, Separated Accessories, Markers & Notes */}
         <div className="lg:col-span-7 space-y-6">
           <form onSubmit={handleSavePlan} className="space-y-6">
             {/* Fabric Requirements Table */}
@@ -505,7 +505,7 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
               </div>
             </div>
 
-            {/* SEPARATED ACCESSORIES SECTION: Shirt vs Pants (Requirement 3) */}
+            {/* SEPARATED ACCESSORIES SECTION: Shirt vs Pants */}
             <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-5">
               <div className="flex items-center justify-between border-b pb-2">
                 <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
@@ -644,41 +644,69 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
               </div>
             </div>
 
-            {/* SPLIT OPERATING NOTES: Shirt Notes & Pants Notes (Requirement 3) */}
+            {/* DESIGN & OPERATING NOTES (Gated by canAddDesignNotes permission - Task 4) */}
             <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-              <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2 border-b pb-2">
-                <span>📝 ملاحظات التشغيل والقص المنفصلة (تيشرت / بنطلون):</span>
-              </h3>
+              <div className="flex items-center justify-between border-b pb-2">
+                <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-amber-600" />
+                  <span>📝 ملاحظات التصميم والتشغيل والقص (اختياري):</span>
+                </h3>
+                {!canWriteNotes && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                    <Lock className="w-3 h-3" />
+                    يتطلب صلاحية تسجيل ملاحظات التصميم
+                  </span>
+                )}
+              </div>
+
+              {/* General Design Notes */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  ملاحظات التصميم العامة (اختياري):
+                </label>
+                <textarea
+                  rows={2}
+                  disabled={!canWriteNotes}
+                  value={designNotes}
+                  onChange={(e) => setDesignNotes(e.target.value)}
+                  placeholder={
+                    canWriteNotes
+                      ? 'أي ملاحظات عامة خاصة بتصميم الموديل أو الباترون...'
+                      : 'ليس لديك صلاحية كتابة ملاحظات التصميم'
+                  }
+                  className="w-full p-3 rounded-2xl border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-hidden disabled:bg-slate-100 disabled:text-slate-400"
+                />
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Shirt Notes */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-blue-900 flex items-center gap-1.5">
                     <Shirt className="w-3.5 h-3.5 text-blue-600" />
-                    <span>ملاحظات تشغيل وقص التيشرت:</span>
+                    <span>ملاحظات تشغيل وقص التيشرت (اختياري):</span>
                   </label>
                   <textarea
-                    rows={4}
-                    disabled={!canEdit}
+                    rows={3}
+                    disabled={!canWriteNotes}
                     value={notesShirt}
                     onChange={(e) => setNotesShirt(e.target.value)}
                     placeholder="تعليمات خاصة بياقة التيشرت، التيكت، تركيب البادج، السوستة، أو التطريز..."
-                    className="w-full p-3 rounded-2xl border border-slate-300 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                    className="w-full p-3 rounded-2xl border border-slate-300 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden disabled:bg-slate-100 disabled:text-slate-400"
                   />
                 </div>
 
                 {/* Pants Notes */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                    <span>👖 ملاحظات تشغيل وقص البنطلون:</span>
+                    <span>👖 ملاحظات تشغيل وقص البنطلون (اختياري):</span>
                   </label>
                   <textarea
-                    rows={4}
-                    disabled={!canEdit}
+                    rows={3}
+                    disabled={!canWriteNotes}
                     value={notesPants}
                     onChange={(e) => setNotesPants(e.target.value)}
                     placeholder="تعليمات خاصة بكمر البنطلون، الجيوب، الأساور المطاطية، الاستيك، أو الحليات..."
-                    className="w-full p-3 rounded-2xl border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                    className="w-full p-3 rounded-2xl border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-hidden disabled:bg-slate-100 disabled:text-slate-400"
                   />
                 </div>
               </div>
@@ -710,13 +738,13 @@ export const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
               </div>
             </div>
 
-            {canEdit && (
+            {(canEdit || canWriteNotes) && (
               <button
                 type="submit"
                 className="w-full py-3.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Save className="w-4 h-4" />
-                <span>حفظ التعديلات وخطة التشغيل</span>
+                <span>حفظ التعديلات وخطة التشغيل والملاحظات</span>
               </button>
             )}
           </form>
